@@ -142,6 +142,36 @@ class SpringAiAgentRuntimeIT {
         assertThat(provider.requests).hasSize(2);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest(name = "guardrail-v1/{0}")
+    @org.junit.jupiter.params.provider.MethodSource("runtimeAttacks")
+    void runtimeRejectsReplayAndSwitchAfterCheckpoint(String id, String tool, String number, String callId) {
+        provider.decision("get_order", "{\"orderNo\":\"SF10001\"}", "first");
+        provider.decision(tool, "{\"orderNo\":\"" + number + "\"}", callId);
+        var run = claim();
+        assertThatThrownBy(() -> loop.advance(buyer, run)).isInstanceOf(ModelUnavailableException.class);
+        assertThat(store.find(run.key()).failureCode()).isEqualTo(AgentFailureCode.VALIDATION_REJECTED);
+        verify(orders, times(1)).lookup(any(), anyLong(), anyString());
+        verifyNoInteractions(logistics);
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> runtimeAttacks() {
+        return java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of("duplicate-call-id", "get_logistics", "SF10001", "first"),
+                org.junit.jupiter.params.provider.Arguments.of("repeated-completed-tool", "get_order", "SF10001", "second"),
+                org.junit.jupiter.params.provider.Arguments.of("switch-order-after-observation", "get_logistics", "SF10002", "second"));
+    }
+
+    @Test void guardrailCrossShopSameOrderNumberCannotSupplyAnObservation() {
+        var foreign = new SupportOrder(124, 101, 999, 200, "SF10001", OrderStatus.SHIPPED,
+                new BigDecimal("99.00"), "CNY", Instant.now(), Instant.now());
+        when(authorization.getOwnedOrder(any(), anyLong(), anyString())).thenReturn(foreign);
+        provider.decision("get_order", "{\"orderNo\":\"SF10001\"}", "first");
+        var run = claim();
+        assertThatThrownBy(() -> loop.advance(buyer, run)).isInstanceOf(dev.supportflow.order.application.exception.OrderNotFoundException.class);
+        assertThat(store.find(run.key()).loopState().observations()).isEmpty();
+        verifyNoInteractions(orders, logistics);
+    }
+
     @Test void exhaustedBudgetAndDeadlinePreventProviderCalls() {
         loop = executor(new AgentRuntimeProperties(8, 90, 1, new BigDecimal("0.05"), 16384, 512,
                 new BigDecimal("0.30"), new BigDecimal("1.20"), "deepseek-flash"));

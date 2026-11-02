@@ -614,7 +614,12 @@ test('switching workspaces preserves the draft and conversation without submitti
 }) => {
   await connect(page)
   await send(page, '查订单 SF10001')
+  // The optimistic USER bubble already contains SF10001. Capture only a committed pair,
+  // after SSE completion and display draining have replaced the temporary assistant.
+  await expect(page.getByTestId('stop-reply')).not.toBeVisible()
+  await expect(page.getByTestId('chat-message').filter({ has: page.locator('.message-order-list') })).toHaveCount(1)
   await expect(page.getByTestId('chat-message').last()).toContainText('SF10001')
+  const messageOrder = await page.getByTestId('chat-message').allTextContents()
   const messageCount = await page.getByTestId('chat-message').count()
   const postsBefore = (await recorded(request)).filter((entry) => entry.method === 'POST')
   await page.getByTestId('message-input').fill('这笔订单什么时候送达？')
@@ -623,6 +628,8 @@ test('switching workspaces preserves the draft and conversation without submitti
   await showChat(page)
   await expect(page.getByTestId('message-input')).toHaveValue('这笔订单什么时候送达？')
   await expect(page.getByTestId('chat-message')).toHaveCount(messageCount)
+  expect(await page.getByTestId('chat-message').allTextContents()).toEqual(messageOrder)
+  await expect(page.getByTestId('streaming-reply')).toHaveCount(0)
   await expect(page.getByTestId('chat-message').last()).toContainText('SF10001')
   await expect(page.getByTestId('orders-panel')).not.toBeVisible()
   await expect(page.locator('.order-detail')).not.toBeVisible()

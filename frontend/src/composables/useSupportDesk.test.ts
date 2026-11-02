@@ -368,6 +368,29 @@ afterEach(() => {
 })
 
 describe('streamed assistant replies', () => {
+  it('replaces a temporary bubble with one canonical pair and deduplicates history hydration', async () => {
+    const desk = createDesk()
+    await desk.connect('buyer', 'test')
+    const pending = deferred<ConversationMessages>()
+    mocks.sendConversationMessage.mockImplementationOnce((...args: unknown[]) => {
+      ;(args[7] as (text: string) => void)('订单')
+      return pending.promise
+    })
+    const sending = desk.sendMessage('查订单 SF10001')
+    await vi.waitFor(() => expect(desk.messages.value.some((item) => item.streaming)).toBe(true))
+    const canonical = storedPair('查订单 SF10001')
+    pending.resolve({ conversation, messages: canonical })
+    await sending
+    expect(desk.messages.value.map((item) => item.id)).toEqual(canonical.map((item) => item.id))
+    expect(desk.messages.value.some((item) => item.pending || item.streaming)).toBe(false)
+    mocks.shopWindowMessages.mockResolvedValue({ conversation, messages: canonical, nextBeforeId: null })
+    await desk.loadEarlierMessages(false)
+    await desk.loadEarlierMessages(false)
+    expect(desk.messages.value.map((item) => item.id)).toEqual(canonical.map((item) => item.id))
+    expect(desk.messages.value.map((item) => item.role)).toEqual(['user', 'assistant'])
+    expect(mocks.sendConversationMessage).toHaveBeenCalledOnce()
+  })
+
   it('shows received text but applies order metadata only after the completed turn', async () => {
     const desk = createDesk()
     await desk.connect('buyer', 'test')

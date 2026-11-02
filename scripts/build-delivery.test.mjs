@@ -169,6 +169,22 @@ test("current public guides export without relative references to files absent f
   }
 });
 
+test("Spring AI source guides become revision-pinned online links and never expand the payload", async () => {
+  const root = await fixture();
+  for (const name of ["spring-ai-integration", "ai-job-gap-audit"]) {
+    await put(root, `docs/${name}.md`, "SOURCE_ONLY_AI_GUIDE");
+    const rewritten = await rewriteDocumentLinks({ root, relative: "docs/interview-guide.md",
+      markdown: `[guide](${name}.md#details)`, sha, bundledFiles: new Set(["docs/interview-guide.md"]) });
+    assert.equal(rewritten, `[guide](https://github.com/wjinhu98-tech/supportflow/blob/${sha}/docs/${name}.md#details)`);
+  }
+  const result = await buildDelivery({ root, sha, builtAt });
+  const archive = await readFile(result.archive);
+  assert.equal(archive.includes(Buffer.from("SOURCE_ONLY_AI_GUIDE")), false);
+  const entries = zipEntries(archive);
+  assert.equal(entries.has("docs/spring-ai-integration.md"), false);
+  assert.equal(entries.has("docs/ai-job-gap-audit.md"), false);
+});
+
 test("missing proof never claims tests passed; malformed or leaked proof is refused", async () => {
   const result = await buildDelivery({ root: await fixture(), sha, builtAt });
   const manifest = JSON.parse(await readFile(path.join(result.directory, "manifest.json")));

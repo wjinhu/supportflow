@@ -54,6 +54,16 @@ class PersistentKnowledgeVectorIT {
         int prior=calls.get();search.index(102,List.of(source),true);assertThat(calls).hasValue(prior);
         assertThat(search.index(102,List.of(),false).status()).isEqualTo("EMPTY");
     }
+    @Test void guardrailRetiredPublicationCannotReappearFromPersistentVectors() {
+        var source=doc("retired-v1","水杯可以使用温水清洗。");
+        var search=new RagKnowledgeSearch(PROPS,(text,query)->vector(),new SimpleMeterRegistry(),store);
+        assertThat(search.search(105,List.of(source),"水杯清洗")).isNotEmpty();
+        Integer stored=jdbc.queryForObject("SELECT COUNT(*) FROM support_knowledge_vector WHERE tenant_id=105",Integer.class);
+        assertThat(stored).isGreaterThan(0);
+        var restarted=new RagKnowledgeSearch(PROPS,(text,query)->vector(),new SimpleMeterRegistry(),store);
+        assertThat(restarted.search(105,List.of(),"水杯清洗")).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM support_knowledge_vector WHERE tenant_id=105",Integer.class)).isEqualTo(stored);
+    }
     @Test void immutableKeysPreserveFirstVectorAndRejectInvalidShapes() {
         var key=new KnowledgeVectorStore.SourceKey(103,"kb-store","v1","a".repeat(64));
         store.save(key,0,vector());var alternate=new float[512];alternate[1]=1;store.save(key,0,alternate);

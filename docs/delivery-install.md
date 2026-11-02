@@ -50,7 +50,7 @@ MySQL 和业务 API 8080 不映射宿主机端口。管理端点不经 Nginx 转
 
 先使用买家账号查看店铺 100 的订单 `LAB-000001`，打开聊天窗口；再使用商家账号打开工作台处理同一店铺的人工接待、历史消息与知识。商品图示例在店铺 102/103，实验商家没有这两个店铺的授权。可在保留数据的情况下停止后重新启动，核对会话与消息。涉及售后的流程只使用隔离实验订单和模拟执行器。RAG 未启用时不能把规则回答描述成向量召回或真实大模型结果。
 
-可选 Node 22.12+ 验收脚本一并提供：`node scripts/check-shop-windows-lab.mjs`、`node scripts/check-human-support-lab.mjs`。它们只访问固定回环教学环境，但人工接待脚本会创建隔离会话记录；不要求安装 Node 才能运行应用。
+可选 Node 22.22.2+ 验收脚本一并提供：`node scripts/check-shop-windows-lab.mjs`、`node scripts/check-human-support-lab.mjs`。它们只访问固定回环教学环境，但人工接待脚本会创建隔离会话记录；不要求安装 Node 才能运行应用。
 
 ```powershell
 .\supportflow.ps1 Status

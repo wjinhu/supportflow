@@ -58,7 +58,7 @@ docker compose -f deploy/compose.yml ps -a
 
 首次前端镜像构建会按 lockfile 安装依赖，并用新目录及 `vite build --emptyOutDir false` 打包，避免递归清理旧输出。镜像构建上下文采用默认拒绝的 `.dockerignore`；只放行最终 jar、前端所需源码/清单和镜像配置，不发送 `.local`、工作站 `node_modules`、Git 数据或环境文件。Node 仅用于构建，最终前端镜像只有 Nginx 与静态文件。
 
-当前固定标签为 `mysql:8.0.45`、`eclipse-temurin:21.0.12.1_1-jre-jammy`、`node:22.15.0-alpine3.21`、`nginxinc/nginx-unprivileged:1.28.0-alpine-slim` 和 `prom/prometheus:v3.2.1`。标签并不是不可变 digest；复现实验应记录实际镜像 ID/digest、提交版本、构建日期与宿主资源，升级镜像后重新验证。固定版本不代表已经做过漏洞评估。
+当前固定标签为 `mysql:8.0.45`、`eclipse-temurin:21.0.12.1_1-jre-jammy`、`node:22.22.2-alpine3.23`、`nginxinc/nginx-unprivileged:1.28.0-alpine-slim` 和 `prom/prometheus:v3.2.1`。标签并不是不可变 digest；复现实验应记录实际镜像 ID/digest、提交版本、构建日期与宿主资源，升级镜像后重新验证。固定版本不代表已经做过漏洞评估。
 
 ## 为什么分成这些初始化步骤
 

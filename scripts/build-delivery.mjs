@@ -22,6 +22,7 @@ const sourceDocLinks = new Set([
   "README.md", "deploy/README.md", "frontend/README.md",
   "docs/after-sale-execution.md", "docs/agent-loop-budget.md", "docs/agent-resilience.md",
   "docs/human-support.md", "docs/job-readiness.md", "docs/semantic-rag.md", "docs/project-boundaries.md",
+  "docs/spring-ai-integration.md", "docs/ai-job-gap-audit.md",
   "src/main/java/dev/supportflow/assistant/aftersale/AfterSalePolicy.java",
   "src/main/java/dev/supportflow/assistant/aftersale/AfterSaleService.java",
   "src/main/java/dev/supportflow/assistant/execution/AfterSaleExecutionProcessor.java",

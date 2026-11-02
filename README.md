@@ -1,6 +1,8 @@
 # SupportFlow
 
-Java / Spring Boot + Vue 店铺客服学习项目：买家查本人订单与物流、咨询规则、申请退款；商家维护知识、人工审核并接待咨询。模型参与受限决策，Java 控制身份、权限、状态与执行边界，知识来源保留用于审计。
+Java 21 / Spring Boot 4 + Vue 店铺客服学习项目，包含可切换 Spring AI 2.0.2 DeepSeek planner、Hybrid Retrieval / BGE、Durable Agent Runtime、MySQL 和 optional Redis Session。买家查本人订单与物流、咨询规则、申请退款，商家维护知识、人工审核并接待咨询。模型参与受限决策，Java 控制身份、权限、状态与执行边界，知识来源保留用于审计。
+
+`supportflow.ai.planner=custom` 当前仍为默认值。Spring AI 模式需显式开启；只有受限模型决策与公开资料筛选经过该适配，具体业务事实由原 Java 运行时校验和执行。
 
 ## 从这里开始
 
