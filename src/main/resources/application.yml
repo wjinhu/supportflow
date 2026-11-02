@@ -1,4 +1,11 @@
 spring:
+  ai:
+    # Adapters are explicitly assembled below; adding the starter never enables paid calls.
+    model:
+      chat: none
+    chat:
+      client:
+        enabled: false
   application:
     name: supportflow-backend
 
@@ -8,6 +15,14 @@ spring:
 
   flyway:
     enabled: false
+
+  data:
+    redis:
+      host: "${SUPPORTFLOW_REDIS_HOST:127.0.0.1}"
+      port: "${SUPPORTFLOW_REDIS_PORT:16379}"
+      password: "${SUPPORTFLOW_REDIS_PASSWORD:}"
+      connect-timeout: 1s
+      timeout: 2s
 
 management:
   endpoints:
@@ -21,6 +36,11 @@ management:
         exclude: "*"
 
 supportflow:
+  security:
+    session:
+      redis:
+        enabled: "${SUPPORTFLOW_REDIS_SESSION_ENABLED:false}"
+        namespace: "${SUPPORTFLOW_REDIS_NAMESPACE:supportflow:local:session}"
   agent:
     retry:
       max-read-retries: 1
@@ -40,6 +60,7 @@ supportflow:
     execution:
       enabled: false
   ai:
+    planner: "${SUPPORTFLOW_AI_PLANNER:custom}"
     deepseek:
       enabled: false
       api-key: "${DEEPSEEK_API_KEY:}"

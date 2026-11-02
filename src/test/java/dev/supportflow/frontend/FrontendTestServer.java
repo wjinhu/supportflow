@@ -282,6 +282,14 @@ public final class FrontendTestServer {
                     VALUES (1001, '2026-10-02 05:06:07.456', '学习版仓库：已出库'),
                            (1001, '2026-10-03 05:06:07.456', '学习版配送中心：运输中')
                     """);
+            // Only the disposable browser fixture: keep the shared order count unchanged.
+            statement.executeUpdate("""
+                    UPDATE support_order
+                    SET product_items_json=JSON_ARRAY(JSON_OBJECT(
+                        'productName','蓝牙耳机','specification','黑色测试款','quantity',1,
+                        'imageUrl','/products/demo/black-earbuds.png')), updated_at=updated_at
+                    WHERE id=1001 AND tenant_id=100 AND buyer_id=200 AND order_no='SF10001'
+                    """);
             try (PreparedStatement insert = connection.prepareStatement("""
                     INSERT INTO support_order (
                         id, tenant_id, customer_id, buyer_id, order_no, status,

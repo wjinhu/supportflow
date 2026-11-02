@@ -367,6 +367,112 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('streamed assistant replies', () => {
+  it('shows received text but applies order metadata only after the completed turn', async () => {
+    const desk = createDesk()
+    await desk.connect('buyer', 'test')
+    const pending = deferred<ConversationMessages>()
+    let delta!: (text: string) => void
+    mocks.sendConversationMessage.mockImplementationOnce((...args: unknown[]) => {
+      delta = args[7] as (text: string) => void
+      delta('订单')
+      return pending.promise
+    })
+    const sending = desk.sendMessage('查订单')
+    await vi.waitFor(() =>
+      expect(desk.messages.value.find((item) => item.streaming)?.text).toBe('订单'),
+    )
+    expect(desk.busy.value).toBe(true)
+    expect(desk.selectedOrder.value).toBeNull()
+    expect(desk.messages.value.find((item) => item.streaming)?.orders).toBeUndefined()
+    delta('已发货')
+    pending.resolve({
+      conversation,
+      messages: storedPair('查订单', {
+        ...textReply,
+        reply: '订单已发货',
+        type: 'ORDER_DETAILS',
+        orders: [order],
+      }),
+    })
+    await sending
+    expect(desk.messages.value.some((item) => item.streaming || item.pending)).toBe(false)
+    expect(desk.messages.value.at(-1)?.text).toBe('订单已发货')
+    expect(desk.selectedOrder.value).toEqual(order)
+    expect(desk.busy.value).toBe(false)
+    expect(mocks.sendConversationMessage).toHaveBeenCalledOnce()
+  })
+
+  it('stops display and ignores late chunks and completion without resending the message', async () => {
+    const desk = createDesk()
+    await desk.connect('buyer', 'test')
+    const pending = deferred<ConversationMessages>()
+    let delta!: (text: string) => void
+    let signal!: AbortSignal
+    mocks.sendConversationMessage.mockImplementationOnce((...args: unknown[]) => {
+      signal = args[5] as AbortSignal
+      delta = args[7] as (text: string) => void
+      delta('你好')
+      return pending.promise
+    })
+    const sending = desk.sendMessage('你好')
+    await vi.waitFor(() => expect(desk.messages.value.some((item) => item.streaming)).toBe(true))
+    desk.stopReply()
+    expect(signal.aborted).toBe(true)
+    expect(desk.busy.value).toBe(false)
+    expect(desk.messages.value.some((item) => item.streaming || item.pending)).toBe(false)
+    delta('不能追加的旧文字')
+    pending.resolve({ conversation, messages: storedPair('你好') })
+    await sending
+    expect(desk.messages.value).toEqual([])
+    expect(desk.error.value).toContain('不要重复发送')
+    expect(mocks.sendConversationMessage).toHaveBeenCalledOnce()
+  })
+
+  it('does not leak partial text or late completion into a different shop', async () => {
+    const desk = createDesk()
+    await desk.connect('buyer', 'test')
+    const pending = deferred<ConversationMessages>()
+    let delta!: (text: string) => void
+    mocks.sendConversationMessage.mockImplementationOnce((...args: unknown[]) => {
+      delta = args[7] as (text: string) => void
+      delta('旧店')
+      return pending.promise
+    })
+    const sending = desk.sendMessage('旧店问题')
+    await vi.waitFor(() => expect(desk.messages.value.some((item) => item.streaming)).toBe(true))
+    await desk.changeShop('101')
+    delta('不应出现')
+    pending.resolve({ conversation, messages: storedPair('旧店问题') })
+    await sending
+    expect(desk.shopId.value).toBe('101')
+    expect(desk.messages.value).toEqual([])
+    expect(desk.error.value).toBeNull()
+  })
+
+  it('removes interrupted partial text and keeps refund actions closed without replay', async () => {
+    const desk = createDesk()
+    await desk.connect('buyer', 'test')
+    let reject!: (failure: unknown) => void
+    const pending = new Promise<ConversationMessages>((_resolve, fail) => {
+      reject = fail
+    })
+    mocks.sendConversationMessage.mockImplementationOnce((...args: unknown[]) => {
+      ;(args[7] as (text: string) => void)('正在')
+      return pending
+    })
+    const sending = desk.sendMessage('申请退款')
+    await vi.waitFor(() => expect(desk.messages.value.some((item) => item.streaming)).toBe(true))
+    reject(new ApiError('流式回复中断', 0, 'STREAM_INTERRUPTED'))
+    await sending
+    expect(desk.messages.value).toEqual([])
+    expect(desk.refundOpen.value).toBe(false)
+    expect(desk.error.value).toContain('不要重复发送')
+    expect(mocks.sendConversationMessage).toHaveBeenCalledOnce()
+    expect(mocks.applyAfterSale).not.toHaveBeenCalled()
+  })
+})
+
 describe('account-wide order workspace', () => {
   const otherShopOrder: Order = { ...order, shopId: 101, totalAmount: 899 }
   const otherConversation: Conversation = {

@@ -21,6 +21,7 @@ spring:
       - "file:./.local/day4-security-secrets.yml"
       - "optional:file:./.local/reviewer-security.yml"
       - "optional:file:./.local/deepseek-secrets.yml"
+      - "optional:file:./.local/redis-secrets.yml"
 
 supportflow:
   traffic:

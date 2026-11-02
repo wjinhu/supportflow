@@ -3,6 +3,7 @@ package dev.supportflow.assistant.knowledge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,6 +16,7 @@ public class RagConfiguration {
     @Bean
     @ConditionalOnProperty(name = {"supportflow.rag.enabled", "supportflow.rag.public-evidence-selection-enabled",
             "supportflow.ai.deepseek.enabled"}, havingValue = "true")
+    @ConditionalOnExpression("'${supportflow.ai.planner:custom}' == 'custom'")
     PublicKnowledgeSelector deepSeekPublicKnowledgeSelector(
             dev.supportflow.chat.infrastructure.deepseek.DeepSeekCallExecutor executor,
             tools.jackson.databind.ObjectMapper json,

@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
-import { connect, send, showChat, showOrders, switchShop } from './helpers'
+import { connect, send, showChat, showOrders, switchShop, readConversationTurn } from './helpers'
+import type { ChatResponse } from '../src/types'
 
 const mockBase = 'http://127.0.0.1:18080'
 type RecordedRequest = {
@@ -9,6 +10,7 @@ type RecordedRequest = {
   hasAuthorization: boolean
   hasSessionCookie: boolean
   hasCsrf: boolean
+  acceptsEventStream: boolean
   accepted: boolean
   body?: { message: string; orderNo?: string }
 }
@@ -22,6 +24,193 @@ test.beforeEach(async ({ request, page }) => {
   await request.post(`${mockBase}/__e2e/reset`)
   await page.goto('/?shopId=100')
 })
+
+async function prepareStream(
+  request: APIRequestContext,
+  message: string,
+  parts: string[],
+  details: Partial<ChatResponse> = {},
+) {
+  const configured = await request.post(`${mockBase}/__e2e/stream-plan`, {
+    data: {
+      message,
+      parts,
+      answer: {
+        reply: parts.join(''),
+        type: 'TEXT',
+        orders: [],
+        nextAfterId: null,
+        knowledge: null,
+        ...details,
+      },
+    },
+  })
+  expect(configured.status()).toBe(200)
+}
+
+async function releaseStream(
+  request: APIRequestContext,
+  message: string,
+  action: 'next' | 'complete' | 'truncate',
+) {
+  const response = await request.post(`${mockBase}/__e2e/stream-release`, {
+    data: { message, action },
+  })
+  expect(response.status()).toBe(200)
+}
+
+async function streamStatus(request: APIRequestContext, message: string) {
+  return (
+    await request.get(`${mockBase}/__e2e/stream-status`, { params: { message } })
+  ).json() as Promise<{
+    started: boolean
+    closed: boolean
+    completed: boolean
+    emittedParts: number
+  }>
+}
+
+test('streamed text is visible before completion while order actions wait for the canonical turn', async ({
+  page,
+  request,
+}) => {
+  const message = '请逐步说明这笔耳机订单的配送进展'
+  const parts = ['这笔耳机订单已经发货。', '预计明天送达，请留意物流更新。']
+  const order = {
+    shopId: 100,
+    orderNo: 'SF10001',
+    status: 'SHIPPED',
+    statusDescription: '已发货',
+    totalAmount: 128.5,
+    currency: 'CNY',
+    createdAt: '2026-10-20T01:00:00Z',
+    updatedAt: '2026-10-20T01:00:00Z',
+    receivedAt: null,
+  }
+  await prepareStream(request, message, parts, {
+    type: 'ORDER_DETAILS',
+    orders: [order],
+    context: {
+      kind: 'ORDER',
+      orderNo: order.orderNo,
+      sourceIds: [],
+      expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+    },
+  })
+  await connect(page)
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      /\/chat\/conversations\/[^/]+\/messages$/.test(new URL(response.url()).pathname) &&
+      response.request().postDataJSON()?.message === message,
+  )
+  await send(page, message)
+  const partial = page.getByTestId('streaming-reply')
+  await expect(partial).toHaveText(parts[0]!)
+  await expect(page.locator('[data-streaming="true"]')).toHaveCount(1)
+  await expect(page.getByTestId('selected-order')).toHaveCount(0)
+  await expect(page.getByTestId('chat-message').getByTestId('order-card')).toHaveCount(0)
+  await expect(page.getByTestId('message-input')).toBeDisabled()
+  expect(await streamStatus(request, message)).toMatchObject({ completed: false, emittedParts: 1 })
+  await releaseStream(request, message, 'next')
+  await expect(partial).toHaveText(parts.join(''))
+  await expect(page.getByTestId('chat-message').getByTestId('order-card')).toHaveCount(0)
+  await releaseStream(request, message, 'complete')
+  const streamedTurn = await readConversationTurn(await responsePromise)
+  expect(streamedTurn.messages.find((message) => message.role === 'ASSISTANT')?.text).toBe(
+    parts.join(''),
+  )
+  await expect(partial).toHaveCount(0)
+  await expect(page.getByTestId('chat-message').last()).toContainText(parts.join(''))
+  await expect(page.getByTestId('chat-message').last().getByTestId('order-card')).toHaveCount(1)
+  await expect(page.getByTestId('selected-order')).toContainText(order.orderNo)
+  await expect(page.getByTestId('message-input')).toBeEnabled()
+  const submissions = (await recorded(request)).filter((entry) => entry.body?.message === message)
+  expect(submissions).toHaveLength(1)
+  expect(submissions[0]).toMatchObject({
+    method: 'POST',
+    hasCsrf: true,
+    hasSessionCookie: true,
+    acceptsEventStream: true,
+  })
+})
+
+test('streamed refund text does not open a form before the completed frame', async ({
+  page,
+  request,
+}) => {
+  const message = '请帮助我选择退货申请的订单'
+  const parts = ['请先选择要申请售后的订单，', '然后填写退款原因。']
+  await prepareStream(request, message, parts, { type: 'AFTER_SALE_FORM' })
+  await connect(page)
+  await send(page, message)
+  await expect(page.getByTestId('streaming-reply')).toHaveText(parts[0]!)
+  await expect(page.locator('.refund-dialog')).toHaveCount(0)
+  expect(
+    (await recorded(request)).filter((entry) => /\/orders\/[^/]+\/after-sales$/.test(entry.path)),
+  ).toHaveLength(0)
+  await releaseStream(request, message, 'complete')
+  await expect(page.getByTestId('streaming-reply')).toHaveCount(0)
+  await expect(page.locator('.refund-dialog')).toBeVisible()
+  expect(
+    (await recorded(request)).filter((entry) => /\/orders\/[^/]+\/after-sales$/.test(entry.path)),
+  ).toHaveLength(0)
+})
+
+test('a truncated stream removes the partial reply and reads history without repeating its POST', async ({
+  page,
+  request,
+}) => {
+  const message = '请逐步回答这次配送咨询然后模拟中断'
+  const parts = ['已查到这次配送的进展，', '完整结果会保留在咨询记录中。']
+  await prepareStream(request, message, parts)
+  await connect(page)
+  await send(page, message)
+  await expect(page.getByTestId('streaming-reply')).toHaveText(parts[0]!)
+  await releaseStream(request, message, 'truncate')
+  await expect(page.getByTestId('streaming-reply')).toHaveCount(0)
+  await expect(page.getByRole('alert')).toContainText(/核实|确认|中断/)
+  await expect(page.getByTestId('message-input')).toBeEnabled()
+  expect((await recorded(request)).filter((entry) => entry.body?.message === message)).toHaveLength(
+    1,
+  )
+  await page.getByRole('button', { name: '重试', exact: true }).click()
+  await expect(page.getByTestId('chat-message').last()).toContainText(parts.join(''))
+  expect((await recorded(request)).filter((entry) => entry.body?.message === message)).toHaveLength(
+    1,
+  )
+})
+
+for (const cancellation of ['shop-switch', 'logout'] as const) {
+  test(`a ${cancellation} aborts an active stream and never leaks later text`, async ({
+    page,
+    request,
+  }) => {
+    const message = `只属于原店铺的受控流式咨询-${cancellation}`
+    const parts = ['这是原店铺回复的第一段。', '原店铺的后半段不应出现在其他会话。']
+    await prepareStream(request, message, parts)
+    await connect(page)
+    await send(page, message)
+    await expect(page.getByTestId('streaming-reply')).toHaveText(parts[0]!)
+    if (cancellation === 'shop-switch') {
+      await page.getByTestId('stop-reply').click()
+      await switchShop(page, '101')
+    } else await page.getByTestId('disconnect-button').click()
+    await expect(page.getByTestId('streaming-reply')).toHaveCount(0)
+    await expect.poll(async () => (await streamStatus(request, message)).closed).toBe(true)
+    await releaseStream(request, message, 'complete')
+    await expect(page.getByTestId('chat-message').filter({ hasText: parts[0] })).toHaveCount(0)
+    await expect(page.getByTestId('chat-message').filter({ hasText: parts[1] })).toHaveCount(0)
+    expect(
+      (await recorded(request)).filter((entry) => entry.body?.message === message),
+    ).toHaveLength(1)
+    if (cancellation === 'shop-switch') {
+      await send(page, '新店铺中的独立咨询')
+      await expect(page.getByTestId('chat-message').last()).toContainText('新店铺中的独立咨询')
+      await expect(page.getByTestId('chat-message').filter({ hasText: parts[1] })).toHaveCount(0)
+    } else await expect(page.getByTestId('send-button')).toBeDisabled()
+  })
+}
 
 test('chat is the default view and order navigation opens a separate workspace', async ({
   page,
@@ -288,7 +477,9 @@ test('product candidates show purchase details and continue only the selected lo
   await page.route('**/api/v1/shops/100/chat/conversations/*/messages', async (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     const submitted = route.request().postDataJSON() as { message: string; orderNo?: string }
-    const upstream = await route.fetch()
+    const upstream = await route.fetch({
+      headers: { ...route.request().headers(), accept: 'application/json' },
+    })
     const result = await upstream.json()
     const answer = result.messages.find((message: { role: string }) => message.role === 'ASSISTANT')
     if (submitted.message === question) {

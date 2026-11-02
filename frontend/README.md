@@ -66,7 +66,7 @@ API_PROXY_TARGET=http://127.0.0.1:8080
 - 错误提示、加载状态、重复发送防护、切换店铺/断开后的迟到响应隔离。
 - 桌面与移动端布局、键盘操作、中文输入法 Enter 防误发。
 
-固定指令「我的订单」「查订单 SF10001」「咨询此订单」不依赖模型。自然语言查单需后端启用 DeepSeek；新增物流/售后在关闭模型时可使用受限规则规划器。知识检索是本地文档检索与引用式抽取，不是任意知识问答。物流未接真实快递接口；审批通过不等于已退款。当前不支持流式聊天；浏览器登录后使用 HttpOnly 会话 Cookie，对话历史、售后与审计持久化到 MySQL。
+固定指令「我的订单」「查订单 SF10001」「咨询此订单」不依赖模型。自然语言查单需后端启用 DeepSeek；新增物流/售后在关闭模型时可使用受限规则规划器。知识检索是本地文档检索与引用式抽取，不是任意知识问答。物流未接真实快递接口；审批通过不等于已退款。客服回复支持校验后 SSE 分段传输与逐段显示，停止输出只中断显示，不撤销已保存的回复；详见[流式回复说明](../docs/chat-streaming.md)；浏览器登录后使用 HttpOnly 会话 Cookie，对话历史、售后与审计持久化到 MySQL。
 
 ## 接口与安全边界
 
@@ -156,3 +156,8 @@ $env:E2E_BACKEND_URL=$null
 测试使用 launcher 中公开的假账号，不使用你的日常账号。完成后 Ctrl+C 停止测试后端，临时容器随其关闭。不要将 `E2E_BACKEND_URL` 指向日常业务实例。
 
 参考：[Vue TypeScript](https://vuejs.org/guide/typescript/overview)、[Vite](https://vite.dev/guide/)、[Playwright Web Server](https://playwright.dev/docs/test-webserver)。
+
+
+## Redis 共享登录
+
+本地可运行 `pwsh -NoProfile -File ../scripts/setup-redis.ps1` 初始化带认证的 Redis。后端从忽略 Git 的 `.local/redis-secrets.yml` 加载连接和显式开关，重启后生效；切换时需要重新登录，订单及聊天记录仍保存在 MySQL。部署原 Cookie、CSRF 和账号撤销规则保持一致，连接失败会拒绝请求，不回退为单机认证。操作步骤、双实例验收和当前限制见[Redis 会话说明](../docs/redis-session.md)。

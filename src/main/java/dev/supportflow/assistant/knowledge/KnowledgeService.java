@@ -165,6 +165,31 @@ public class KnowledgeService {
         }
     }
 
+    /** Uses a Java-verified product subject locally; order facts and merchant prose never reach a model. */
+    public KnowledgeAnswer answerProductDetailed(long shopId, String productName, String message) {
+        if (shopId <= 0 || productName == null || productName.isBlank() || productName.length() > 200
+                || !valid(message) || isProtected(message)) return missingProductAnswer();
+        try {
+            var documents = new ArrayList<KnowledgeDocument>();
+            if (managed != null) {
+                // Keep only current merchant publications here. Public references below are canonical,
+                // independent of embedding flags, and cannot be replaced by a forged ref-* snapshot.
+                documents.addAll(shopDocuments(shopId).stream()
+                        .filter(document -> document.sourceId().startsWith("kb-")).toList());
+            }
+            documents.addAll(publicReferences.forShop(shopId));
+            var matches = ProductKnowledgeSearch.retrieve(documents, productName, message);
+            return matches.isEmpty() ? missingProductAnswer() : renderDetailed(matches);
+        } catch (RuntimeException unavailable) {
+            return unavailableAnswer();
+        }
+    }
+
+    private static KnowledgeAnswer missingProductAnswer() {
+        return new KnowledgeAnswer("当前店铺暂无这款商品对应操作的可靠使用资料。请补充具体型号或说明想了解的操作，或联系店铺客服核实。",
+                new KnowledgeEvidence(KnowledgeStatus.NO_MATCH, List.of()));
+    }
+
     private static KnowledgeAnswer unavailableAnswer() {
         return new KnowledgeAnswer(UNAVAILABLE, new KnowledgeEvidence(KnowledgeStatus.UNAVAILABLE, List.of()));
     }

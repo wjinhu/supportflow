@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import type { ChatResponse, KnowledgeArticle } from '../src/types'
-import { connect, send, switchShop, clearShopConversation } from './helpers'
+import { connect, send, switchShop, clearShopConversation, readConversationTurn } from './helpers'
 import { sessionAccount } from './session'
 
 const password = 'Frontend-Test-Only!'
@@ -38,7 +38,7 @@ async function ask(page: Page, text: string) {
   await send(page, text)
   const response = await responded
   expect(response.status()).toBe(200)
-  const turn = (await response.json()) as {
+  const turn = (await readConversationTurn(response)) as {
     messages: { role: string; response: ChatResponse | null }[]
   }
   const answer = turn.messages.find((message) => message.role === 'ASSISTANT')!.response!
@@ -92,6 +92,81 @@ test('restored order context supports a fresh read and cancelling the current se
   const otherShop = await ask(page, '这单现在是什么状态？')
   expect(otherShop.answer.context?.kind).toBe('NONE')
   expect(otherShop.answer.orders).toEqual([])
+})
+
+test('an owned earbud order supplies the product for usage follow-ups across clarification and reconnect', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(90_000)
+  const client = await editor()
+  const token = `earbud-context-${Date.now()}`
+  const content = `蓝牙耳机使用说明：先核对随附产品说明，再让耳机进入配对状态。安卓手机打开蓝牙设置，选择耳机名称并按屏幕提示连接；不同型号的按键和菜单可能不同，应以对应说明为准。测试核验标记 ${token}。`
+  let published: KnowledgeArticle | null = null
+  try {
+    const article = await api<KnowledgeArticle>(client, 'POST', knowledgeBase, {
+      title: `蓝牙耳机安卓手机连接说明-${token}`,
+      keywords: ['蓝牙耳机', '安卓手机', token],
+      content,
+    })
+    published = await api<KnowledgeArticle>(
+      client,
+      'POST',
+      `${knowledgeBase}/${article.id}/publish`,
+      {
+        expectedVersion: article.version,
+      },
+    )
+    await page.goto('/?shopId=100')
+    await connect(page, 'frontend-buyer', password)
+    await clearShopConversation(page)
+    const selected = await ask(page, '查订单 SF10001')
+    expect(selected.answer.orders[0]?.items?.[0]?.productName).toBe('蓝牙耳机')
+    expect(selected.answer.context?.orderNo).toBe('SF10001')
+
+    const clarified = await ask(page, '它呢')
+    expect(clarified.answer.context?.kind).toBe('ORDER')
+    expect(clarified.answer.context?.orderNo).toBe('SF10001')
+    expect(clarified.answer.orders).toEqual([])
+
+    const usage = await ask(page, '如何使用')
+    expect(usage.answer.reply).toContain('蓝牙耳机')
+    expect(usage.answer.reply).toContain(token)
+    expect(usage.answer.reply).not.toContain('对不起，无法回复您的问题')
+    expect(usage.answer.context?.kind).toBe('ORDER')
+    expect(usage.answer.context?.orderNo).toBe('SF10001')
+    expect(usage.answer.knowledge?.sources.map((source) => source.sourceId)).toContain(
+      `kb-${article.id}`,
+    )
+    await page.reload()
+    await connect(page, 'frontend-buyer', password)
+    await expect(page.getByTestId('selected-order')).toHaveCount(0)
+    const reconnected = await ask(page, '怎么连接手机')
+    expect(reconnected.requestBody.orderNo == null).toBe(true)
+    expect(reconnected.answer.reply).toContain(token)
+    expect(reconnected.answer.reply).toContain('安卓手机')
+    expect(reconnected.answer.context?.orderNo).toBe('SF10001')
+    const platform = await ask(page, '安卓手机')
+    expect(platform.answer.reply).toContain(token)
+    expect(platform.answer.context?.orderNo).toBe('SF10001')
+    await page.screenshot({
+      path: testInfo.outputPath('earbud-usage-follow-up.png'),
+      fullPage: true,
+    })
+
+    await switchShop(page, '101')
+    const otherShop = await ask(page, '如何使用')
+    expect(otherShop.answer.context?.kind).toBe('NONE')
+    expect(otherShop.answer.knowledge?.sources ?? []).toEqual([])
+    expect(otherShop.answer.reply).toMatch(/选择|商品|订单/)
+    expect(otherShop.answer.reply).not.toContain(token)
+    expect(otherShop.answer.reply).not.toContain('对不起，无法回复您的问题')
+  } finally {
+    if (published)
+      await api(client, 'POST', `${knowledgeBase}/${published.id}/offline`, {
+        expectedVersion: published.version,
+      })
+    await client.dispose()
+  }
 })
 
 test('knowledge follow-ups reload the current publication and never resurrect an offline source from history', async ({
@@ -200,6 +275,7 @@ test('an ambiguous knowledge reference asks for a topic and a write request cann
     const clarified = await ask(page, '那怎么使用？')
     expect(clarified.answer.reply).toMatch(/多份|明确/)
     expect(clarified.answer.orders).toEqual([])
+    expect(clarified.answer.context).toEqual(multiple.answer.context)
 
     await ask(page, '查订单 SF10001')
     await page.reload()

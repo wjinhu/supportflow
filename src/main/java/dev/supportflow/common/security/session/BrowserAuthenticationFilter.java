@@ -14,6 +14,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.CredentialsContainer;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
 import org.springframework.security.web.context.SecurityContextRepository;
@@ -63,11 +64,14 @@ public final class BrowserAuthenticationFilter extends OncePerRequestFilter {
         new SecurityContextLogoutHandler().logout(request, response,
                 SecurityContextHolder.getContext().getAuthentication());
         if (path.endsWith("/logout")) {
-            String configuredCookieName = request.getServletContext().getSessionCookieConfig().getName();
+            var cookieSettings = request.getServletContext().getSessionCookieConfig();
+            String configuredCookieName = cookieSettings.getName();
             var expiredCookie = new Cookie(configuredCookieName == null ? "JSESSIONID" : configuredCookieName, "");
-            expiredCookie.setPath(request.getContextPath().isEmpty() ? "/" : request.getContextPath());
+            expiredCookie.setPath(cookieSettings.getPath() != null ? cookieSettings.getPath()
+                    : request.getContextPath().isEmpty() ? "/" : request.getContextPath());
+            if (cookieSettings.getDomain() != null) expiredCookie.setDomain(cookieSettings.getDomain());
             expiredCookie.setHttpOnly(true);
-            expiredCookie.setSecure(request.isSecure());
+            expiredCookie.setSecure(cookieSettings.isSecure() || request.isSecure());
             expiredCookie.setMaxAge(0);
             expiredCookie.setAttribute("SameSite", "Lax");
             response.addCookie(expiredCookie);
@@ -106,6 +110,7 @@ public final class BrowserAuthenticationFilter extends OncePerRequestFilter {
         try {
             var result = authenticationManager.authenticate(UsernamePasswordAuthenticationToken.unauthenticated(
                     credentials.path("username").asString(), credentials.path("password").asString()));
+            if (result instanceof CredentialsContainer credentialContainer) credentialContainer.eraseCredentials();
             var context = SecurityContextHolder.createEmptyContext();
             context.setAuthentication(result);
             SecurityContextHolder.setContext(context);

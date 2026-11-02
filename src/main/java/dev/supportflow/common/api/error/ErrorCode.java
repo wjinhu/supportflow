@@ -7,6 +7,8 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 public enum ErrorCode {
 
+    SESSION_UNAVAILABLE("SESSION_UNAVAILABLE", "登录服务暂时不可用，请稍后重试。"),
+
     ORDER_DELETION_CONFLICT("ORDER_DELETION_CONFLICT", "当前订单暂不能删除，请刷新后重试。"),
 
     ORDER_RECEIPT_CONFLICT("ORDER_RECEIPT_CONFLICT", "当前订单状态不支持确认收货，请刷新后重试；历史订单缺少收货时间时，请联系客服核实。"),

@@ -1,6 +1,7 @@
 import { onScopeDispose, ref, watch } from 'vue'
 import { ApiClient, ApiError, validShopId } from '../api/client'
 import { useSupportChannel } from './useSupportChannel'
+import { createReplyDisplay } from './streamedReply'
 import type {
   AfterSaleEligibility,
   AfterSaleTicket,
@@ -670,6 +671,21 @@ export function useSupportDesk() {
     }
     const resetTopic = contextResetPending.value
     const clientMessageId = crypto.randomUUID()
+    const streamMessageId = `stream-${clientMessageId}`
+    const replyDisplay = createReplyDisplay(signal, (text) => {
+      if (signal.aborted || client !== activeClient || shopId.value !== activeShop || !text) return
+      const partial = messages.value.find((item) => item.id === streamMessageId)
+      if (partial) partial.text = text
+      else
+        messages.value.push({
+          id: streamMessageId,
+          role: 'assistant',
+          text,
+          createdAt: new Date().toISOString(),
+          streaming: true,
+          pending: true,
+        })
+    })
     busy.value = true
     error.value = null
     messages.value.push({
@@ -694,10 +710,17 @@ export function useSupportDesk() {
         selected,
         signal,
         resetTopic,
+        (delta) => {
+          if (!signal.aborted && client === activeClient && shopId.value === activeShop)
+            replyDisplay.push(delta)
+        },
       )
-      if (signal.aborted) return
+      await replyDisplay.finish()
+      if (signal.aborted || client !== activeClient || shopId.value !== activeShop) return
       messages.value = [
-        ...messages.value.filter((item) => item.id !== clientMessageId),
+        ...messages.value.filter(
+          (item) => item.id !== clientMessageId && item.id !== streamMessageId,
+        ),
         ...result.messages.map((item) => restoreMessage(item, false)),
       ]
       upsertConversation(result.conversation)
@@ -718,7 +741,9 @@ export function useSupportDesk() {
       report(failure, signal)
       if (!signal.aborted && connected.value) {
         if (failure instanceof ApiError && failure.status === 409) await human.refresh()
-        messages.value = messages.value.filter((item) => item.id !== clientMessageId)
+        messages.value = messages.value.filter(
+          (item) => item.id !== clientMessageId && item.id !== streamMessageId,
+        )
         if (
           failure instanceof ApiError &&
           failure.status === 503 &&
@@ -733,8 +758,18 @@ export function useSupportDesk() {
           error.value = '消息结果暂时无法确认，请刷新咨询记录核实，不要重复发送。'
       }
     } finally {
+      replyDisplay.cancel()
       if (!signal.aborted) busy.value = false
     }
+  }
+
+  function stopReply() {
+    if (!busy.value) return
+    conversationRequest.abort()
+    conversationRequest = new AbortController()
+    messages.value = messages.value.filter((item) => !item.pending)
+    busy.value = false
+    error.value = '已停止输出。回复可能已保存，请刷新咨询记录核实，不要重复发送。'
   }
 
   async function selectOrder(
@@ -1362,6 +1397,7 @@ export function useSupportDesk() {
     selectOrder,
     clearSelectedOrder,
     sendMessage,
+    stopReply,
     clearConversation,
     dismissError,
   }

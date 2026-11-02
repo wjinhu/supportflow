@@ -87,6 +87,8 @@ export interface ChatMessage {
   /** Restored order cards are immutable historical snapshots, never current business state. */
   historical?: boolean
   pending?: boolean
+  /** Temporary text only; actions and reply metadata arrive with the validated final turn. */
+  streaming?: boolean
   human?: boolean
 }
 

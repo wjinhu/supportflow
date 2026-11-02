@@ -1,5 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
-import { connect, send, showChat, showOrders, switchShop, clearShopConversation } from './helpers'
+import {
+  connect,
+  send,
+  showChat,
+  showOrders,
+  switchShop,
+  clearShopConversation,
+  readConversationTurn,
+} from './helpers'
 import { sessionAccount } from './session'
 import type {
   AfterSaleEligibility,
@@ -44,7 +52,7 @@ async function chat(page: Page, message: string) {
   await send(page, message)
   const response = await responsePromise
   expect(response.status(), `Chat failed for: ${message}`).toBe(200)
-  const turn = (await response.json()) as {
+  const turn = (await readConversationTurn(response)) as {
     messages: { role: string; response: ChatResponse | null }[]
   }
   const body = turn.messages.find((message) => message.role === 'ASSISTANT')!.response!
@@ -478,7 +486,7 @@ test('real buyer deletion hides an ended order across reads and reconnect while 
       response.request().postDataJSON()?.orderNo === orderNo,
   )
   await selectOrder(page, orderNo)
-  const turn = (await (await selected).json()) as { conversation: { id: string } }
+  const turn = await readConversationTurn(await selected)
   const historyPath = `/api/v1/shops/100/chat/conversations/${turn.conversation.id}/messages`
   const historyBefore = await page.request.get(historyPath, { headers })
   expect(historyBefore.status()).toBe(200)

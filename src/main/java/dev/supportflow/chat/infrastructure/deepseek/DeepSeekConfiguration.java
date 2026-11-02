@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,14 +21,14 @@ import java.net.http.HttpClient;
 public class DeepSeekConfiguration {
 
     @Bean
-    @ConditionalOnProperty(prefix = "supportflow.ai.deepseek", name = "enabled", havingValue = "true")
+    @ConditionalOnExpression("${supportflow.ai.deepseek.enabled:false} && '${supportflow.ai.planner:custom}' == 'custom'")
     dev.supportflow.assistant.runtime.planning.AgentDecisionPlanner deepSeekAgentDecisionPlanner(
             DeepSeekCallExecutor executor, ObjectMapper mapper, DeepSeekProperties properties) {
         return new DeepSeekAgentDecisionPlanner(executor, mapper, properties);
     }
 
     @Bean
-    @ConditionalOnProperty(prefix = "supportflow.ai.deepseek", name = "enabled", havingValue = "false", matchIfMissing = true)
+    @ConditionalOnExpression("!${supportflow.ai.deepseek.enabled:false} && '${supportflow.ai.planner:custom}' == 'custom'")
     dev.supportflow.assistant.runtime.planning.AgentDecisionPlanner localAgentDecisionPlanner() {
         return new dev.supportflow.assistant.runtime.planning.RuleBasedAgentDecisionPlanner();
     }

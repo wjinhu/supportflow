@@ -5,7 +5,7 @@ import type {
   KnowledgeAuditPage,
   ShopConversationWindow,
 } from '../src/types'
-import { connect, send } from './helpers'
+import { connect, send, readConversationTurn } from './helpers'
 import { sessionAccount } from './session'
 
 // Public isolated-launcher identities, never daily business credentials.
@@ -405,7 +405,7 @@ test('knowledge answers show plain text while audit snapshots keep the cited rev
     await send(page, question)
     const turnResponse = await responded
     expect(turnResponse.status()).toBe(200)
-    const turn = (await turnResponse.json()) as {
+    const turn = (await readConversationTurn(turnResponse)) as {
       messages: { role: string; response: ChatResponse | null }[]
     }
     const result = turn.messages.find((message) => message.role === 'ASSISTANT')!.response!
@@ -479,7 +479,7 @@ test('an unsupported knowledge question returns no evidence instead of fabricate
   await send(page, question)
   const response = await responded
   expect(response.status()).toBe(200)
-  const turn = (await response.json()) as {
+  const turn = (await readConversationTurn(response)) as {
     messages: { role: string; response: ChatResponse | null }[]
   }
   const result = turn.messages.find((message) => message.role === 'ASSISTANT')!.response!

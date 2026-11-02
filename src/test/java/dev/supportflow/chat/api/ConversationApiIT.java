@@ -35,6 +35,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -69,6 +70,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** Conversation ownership, durable snapshots and replay protection against an isolated MySQL. */
@@ -83,6 +86,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Testcontainers
 @Execution(ExecutionMode.SAME_THREAD)
 class ConversationApiIT {
+    private static final String STREAM_ACCEPT = "text/event-stream, application/json;q=0.9";
     private static final String DATABASE = "supportflow_conversation_test";
     private static final String PASSWORD = UUID.randomUUID().toString();
     private static final String HASH = PasswordEncoderFactories.createDelegatingPasswordEncoder().encode(PASSWORD);
@@ -165,6 +169,99 @@ class ConversationApiIT {
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+    }
+
+    @Test
+    void shouldStreamPersistedReplyAndReplayTheSameCanonicalTurnWithoutExecutingTwice() throws Exception {
+        long shop = SHOP.incrementAndGet();
+        Fixture order = order(shop, 200, "SHIPPED");
+        String id = create("buyer", shop).path("id").asString();
+        String key = UUID.randomUUID().toString();
+        String text = "查询此订单";
+        String request = json.writeValueAsString(Map.of("clientMessageId", key, "message", text, "orderNo", order.number()));
+
+        MvcResult streamed = mvc.perform(post(messagesUrl(shop, id)).with(httpBasic("buyer", PASSWORD)).with(csrf())
+                        .header("Accept", STREAM_ACCEPT).contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk()).andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(header().string("X-Accel-Buffering", "no")).andReturn();
+        JsonNode completed = streamedTurn(streamed);
+        JsonNode replay = body(send("buyer", shop, id, key, text, order.number()).andExpect(status().isOk()).andReturn());
+        assertThat(completed).isEqualTo(replay);
+        assertThat(history("buyer", shop, id, null).path("messages")).isEqualTo(completed.path("messages"));
+        assertThat(messageCount(id)).isEqualTo(2);
+        assertThat(turnCount(id)).isEqualTo(1);
+        verify(orchestrator, times(1)).reply(any(), eq(shop), eq(text), eq(order.number()));
+    }
+
+    @Test
+    void shouldKeepStreamAuthenticationCsrfAccountTypeAndConversationOwnershipChecks() throws Exception {
+        long shop = SHOP.incrementAndGet();
+        String id = create("buyer", shop).path("id").asString();
+        String request = json.writeValueAsString(Map.of("clientMessageId", UUID.randomUUID().toString(), "message", "hello"));
+        mvc.perform(post(messagesUrl(shop, id)).with(csrf()).header("Accept", STREAM_ACCEPT)
+                .contentType(MediaType.APPLICATION_JSON).content(request)).andExpect(status().isUnauthorized());
+        mvc.perform(post(messagesUrl(shop, id)).with(httpBasic("buyer", PASSWORD)).header("Accept", STREAM_ACCEPT)
+                .contentType(MediaType.APPLICATION_JSON).content(request)).andExpect(status().isForbidden());
+        mvc.perform(post(messagesUrl(shop, id)).with(httpBasic("merchant", PASSWORD)).with(csrf())
+                .header("Accept", STREAM_ACCEPT).contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isForbidden());
+        for (String username : List.of("buyer", "other")) {
+            long requestedShop = username.equals("buyer") ? shop + 100_000 : shop;
+            mvc.perform(post(messagesUrl(requestedShop, id)).with(httpBasic(username, PASSWORD)).with(csrf())
+                            .header("Accept", STREAM_ACCEPT).contentType(MediaType.APPLICATION_JSON).content(request))
+                    .andExpect(status().isNotFound()).andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                    .andExpect(jsonPath("$.code").value("CONVERSATION_NOT_FOUND"));
+        }
+        assertThat(messageCount(id)).isZero();
+        assertThat(turnCount(id)).isZero();
+    }
+
+    @Test
+    void shouldReturnNormalJsonErrorBeforeStreamingWhenTheModelFails() throws Exception {
+        long shop = SHOP.incrementAndGet();
+        String id = create("buyer", shop).path("id").asString();
+        String text = "STREAM_MODEL_FAILURE";
+        doThrow(new ModelUnavailableException()).when(orchestrator).reply(any(), eq(shop), eq(text), isNull());
+        MvcResult failed = mvc.perform(post(messagesUrl(shop, id)).with(httpBasic("buyer", PASSWORD)).with(csrf())
+                        .header("Accept", STREAM_ACCEPT).contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("clientMessageId", UUID.randomUUID().toString(), "message", text))))
+                .andExpect(status().isServiceUnavailable()).andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value("MODEL_UNAVAILABLE")).andReturn();
+        assertThat(failed.getResponse().getContentAsString(StandardCharsets.UTF_8)).doesNotContain("event: delta", "event: completed");
+        assertThat(messageCount(id)).isZero();
+        verify(orchestrator, times(1)).reply(any(), eq(shop), eq(text), isNull());
+    }
+
+    @Test
+    void shouldKeepJsonDefaultWhenAcceptIsAbsentOrWildcard() throws Exception {
+        long shop = SHOP.incrementAndGet();
+        String id = create("buyer", shop).path("id").asString();
+        for (boolean wildcard : List.of(false, true)) {
+            var request = post(messagesUrl(shop, id)).with(httpBasic("buyer", PASSWORD)).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
+                            "clientMessageId", UUID.randomUUID().toString(), "message", "hello")));
+            if (wildcard) request.accept(MediaType.ALL);
+            MvcResult result = mvc.perform(request).andExpect(status().isOk())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)).andReturn();
+            assertThat(body(result).path("messages").size()).isEqualTo(2);
+            assertThat(result.getResponse().getContentAsString(StandardCharsets.UTF_8)).doesNotStartWith("event:");
+        }
+        assertThat(messageCount(id)).isEqualTo(4);
+    }
+
+    private JsonNode streamedTurn(MvcResult result) throws Exception {
+        String[] frames = result.getResponse().getContentAsString(StandardCharsets.UTF_8).split("\n\n");
+        assertThat(frames).hasSizeGreaterThan(1);
+        StringBuilder reply = new StringBuilder();
+        for (int index = 0; index < frames.length - 1; index++) {
+            assertThat(frames[index]).startsWith("event: delta\ndata: ");
+            reply.append(json.readTree(frames[index].substring("event: delta\ndata: ".length())).path("text").asString());
+        }
+        assertThat(frames[frames.length - 1]).startsWith("event: completed\ndata: ");
+        JsonNode turn = json.readTree(frames[frames.length - 1].substring("event: completed\ndata: ".length()));
+        assertThat(reply.toString()).isEqualTo(turn.path("messages").get(1).path("text").asString());
+        return turn;
     }
 
     @Test

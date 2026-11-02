@@ -48,7 +48,11 @@ public class ConversationContextEngine {
             "^(?:那|那么|现在|目前)?(?:发货了吗|是什么状态|状态怎么样|金额是多少|总价是多少|物流到哪了|查物流|查订单状态|订单状态|查一下状态"
                     + "|(?:快递|物流)(?:信息|进度|轨迹|到哪里了|到哪了|什么时候(?:能)?到|怎么样))[？?！!。\\s]*$");
     private static final Pattern KNOWLEDGE_FOLLOWUP = Pattern.compile(
-            "怎么|如何|可以|能|填写|使用|说明|颜色|材质|保养|洗护|尺码|介绍|还有|具体");
+            "怎么|如何|可以|能|填写|使用|说明|颜色|材质|保养|洗护|尺码|介绍|还有|具体|连接|配对|充电|安卓|Android|Windows",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern GENERIC_FOLLOWUP = Pattern.compile(
+            "^(?:(?:那|那么|这个|那个|刚才那个|刚才的)[，,\\s]*)?"
+                    + "(?:呢|为什么|为啥|然后呢|接下来呢|继续|继续说|继续讲|详细一点|再详细一点|说具体一点|具体说说|解释一下|再说一遍)[？?！!。\\s]*$");
 
     private final ConversationOrchestrator orchestrator;
     private final KnowledgeService knowledge;
@@ -100,6 +104,24 @@ public class ConversationContextEngine {
             if (product.isPresent()) return productReply(principal, shopId, product.get(), request, runKey, now);
         }
         String explicitOrder = explicit.isEmpty() ? request.orderNo() : explicit.iterator().next();
+        if (ProductUsageQuestion.matches(message)) {
+            String number = explicitOrder != null ? explicitOrder
+                    : context.kind() == ConversationContextKind.ORDER ? context.orderNo() : null;
+            if (number != null) return productUsageReply(principal, shopId, message, number, context, now);
+            if (context.kind() == ConversationContextKind.KNOWLEDGE) {
+                if (context.sourceIds().size() == 1) {
+                    return knowledgeResponse(knowledge.followUpDetailed(shopId, message, context.sourceIds()), now, shopId);
+                }
+                return clarify("上一条涉及多份资料，请明确你想继续咨询哪一个主题。", context);
+            }
+            return clarify("你想了解哪件商品的使用方法？请先选择要咨询的订单，或告诉我商品名称和具体型号。", context);
+        }
+        if (GENERIC_FOLLOWUP.matcher(message).matches() && explicit.isEmpty()
+                && context.kind() != ConversationContextKind.NONE) {
+            return clarify(context.kind() == ConversationContextKind.ORDER
+                    ? "你想继续了解这笔订单的状态、物流，还是商品的使用方法？"
+                    : "我们可以继续刚才的商品咨询。你想进一步了解使用步骤、适用条件，还是其中某一点？", context);
+        }
         boolean reference = REFERENCE.matcher(message).find();
         boolean readSubject = ORDER_READ_SUBJECT.matcher(message).find();
         boolean publicPriceQuestion = explicit.isEmpty() && PUBLIC_PRICE_SUBJECT.matcher(message).find()
@@ -141,10 +163,14 @@ public class ConversationContextEngine {
             if (current.isPresent()) return knowledgeResponse(current.get(), now, shopId);
             if (!KNOWLEDGE_FOLLOWUP.matcher(message).find()
                     || context.kind() != ConversationContextKind.KNOWLEDGE) {
-                return clarify("请说明你指的是哪件商品或哪条资料，我不会猜测上文对象。");
+                return clarify(context.kind() == ConversationContextKind.ORDER
+                        ? "你想继续了解这笔订单的状态、物流，还是商品的使用方法？"
+                        : context.kind() == ConversationContextKind.KNOWLEDGE
+                        ? "请说明你想继续了解哪一点，我会接着刚才的商品咨询处理。"
+                        : "你想了解哪件商品或哪笔订单？请先选择订单，或告诉我商品名称和问题。", context);
             }
             if (context.sourceIds().size() != 1) {
-                return clarify("上一条涉及多份资料，请明确你想继续咨询哪一个主题。");
+                return clarify("上一条涉及多份资料，请明确你想继续咨询哪一个主题。", context);
             }
             return knowledgeResponse(knowledge.followUpDetailed(shopId, request.message(), context.sourceIds()), now, shopId);
         }
@@ -190,6 +216,26 @@ public class ConversationContextEngine {
         return ChatResponse.from(orchestrator.reply(principal, shopId, message, orderNo));
     }
 
+    private ChatResponse productUsageReply(CustomerPrincipal principal, long shopId, String message,
+                                          String number, ConversationContextRef previous, Instant now) {
+        // A restored reference must be rechecked against the current owner, deletion state and product snapshots.
+        var order = orders.getOwnedOrder(principal.getIdentity(), shopId, number);
+        var names = order.items().stream().map(item -> item.productName()).distinct().toList();
+        var reference = previous.kind() == ConversationContextKind.ORDER && number.equals(previous.orderNo())
+                ? previous : ConversationContextRef.order(number, expiry(now));
+        if (names.isEmpty()) {
+            return clarify("你在咨询这笔订单的商品使用方法。不过订单中没有记录商品名称，请告诉我商品名称和具体型号。", reference);
+        }
+        if (names.size() != 1) {
+            return clarify("这笔订单有多种商品：" + String.join("、", names)
+                    + "。你想了解哪一件的使用方法？请把商品名称和问题一起告诉我。", reference);
+        }
+        var answer = knowledge.answerProductDetailed(shopId, names.getFirst(), message);
+        // Keep the owned order as the subject so the next short product question has a trusted anchor.
+        return ChatResponse.from(ChatReply.knowledge(answer.reply(), answer.evidence()))
+                .withContext(ConversationContextRef.order(number, expiry(now)));
+    }
+
     private ChatResponse knowledgeResponse(KnowledgeAnswer answer, Instant now, long shopId) {
         return enrich(ChatResponse.from(ChatReply.knowledge(answer.reply(), answer.evidence())),
                 ConversationContextRef.none(), now, shopId);
@@ -218,6 +264,11 @@ public class ConversationContextEngine {
 
     private static ChatResponse clarify(String message) {
         return ChatResponse.from(ChatReply.text(message.strip())).withContext(ConversationContextRef.none());
+    }
+
+    private static ChatResponse clarify(String message, ConversationContextRef previous) {
+        // Clarification is not a new subject, a successful fact check, or a renewal of its lifetime.
+        return ChatResponse.from(ChatReply.text(message.strip())).withContext(previous);
     }
 
     private static Instant expiry(Instant now) {

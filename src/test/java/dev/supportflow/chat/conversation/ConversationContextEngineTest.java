@@ -16,6 +16,7 @@ import dev.supportflow.order.application.OrderQueryService;
 import dev.supportflow.order.application.exception.OrderNotFoundException;
 import dev.supportflow.order.domain.model.OrderStatus;
 import dev.supportflow.order.domain.model.SupportOrder;
+import dev.supportflow.order.domain.model.OrderItemSnapshot;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -210,7 +211,10 @@ class ConversationContextEngineTest {
     @Test
     void multipleKnowledgeSourcesAndMissingTopicsAreClarifiedWithoutGuessing() {
         var multiple = ConversationContextRef.knowledge(List.of(SOURCE, "second-source"), expiry());
-        assertThat(reply("那怎么填写？", null, multiple).context().kind()).isEqualTo(ConversationContextKind.NONE);
+        assertThat(reply("那怎么填写？", null, multiple).context()).isEqualTo(multiple);
+        var usage = reply("这个怎么使用", null, multiple);
+        assertThat(usage.context()).isEqualTo(multiple);
+        assertThat(usage.reply()).contains("多份", "明确");
         assertThat(reply("那怎么填写？", null, ConversationContextRef.none()).context().kind())
                 .isEqualTo(ConversationContextKind.NONE);
         verify(knowledge, never()).followUpDetailed(anyLong(), anyString(), anyList());
@@ -246,13 +250,14 @@ class ConversationContextEngineTest {
     }
 
     @Test
-    void vaguePronounsRequireClarificationForMissingExpiredOrderAndMultipleKnowledgeTopics() {
+    void vaguePronounsKeepOnlyAStillValidPointerWhileClarifyingWithoutGuessing() {
         var expired = ConversationContextRef.order("SF10001", NOW);
         var multiple = ConversationContextRef.knowledge(List.of(SOURCE, "second-source"), expiry());
         for (ConversationContextRef previous : List.of(ConversationContextRef.none(), expired,
                 orderContext(), knowledgeContext(), multiple)) {
             for (String text : List.of("它呢", "那呢", "刚才那个呢")) {
-                assertThat(reply(text, null, previous).context().kind()).isEqualTo(ConversationContextKind.NONE);
+                assertThat(reply(text, null, previous).context())
+                        .isEqualTo(previous.activeAt(NOW) ? previous : ConversationContextRef.none());
             }
         }
         verify(knowledge, never()).followUpDetailed(anyLong(), anyString(), anyList());
@@ -413,6 +418,86 @@ class ConversationContextEngineTest {
         verify(orders).getOwnedOrder(principal.getIdentity(), 100, "SF10001");
         verify(orders, never()).findOwnedOrdersByProduct(any(), anyLong(), anyString());
         verifyNoInteractions(knowledge);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"如何使用", "怎么连接手机", "安卓手机", "这个怎么用", "如何充电"})
+    void shortProductQuestionsRecheckTheOwnedOrderAndResolveOnlyItsUniqueProduct(String question) {
+        when(orders.getOwnedOrder(principal.getIdentity(), 100, "SF10001"))
+                .thenReturn(orderWithItems(new OrderItemSnapshot("蓝牙耳机", "黑色", 1)));
+        when(knowledge.answerProductDetailed(100, "蓝牙耳机", question))
+                .thenReturn(answer(SOURCE, "v2", "请按耳机说明进入配对状态，在手机蓝牙设置中连接。"));
+        var response = reply(question, null, orderContext());
+        assertThat(response.reply()).contains("蓝牙", "连接");
+        assertThat(response.context()).isEqualTo(ConversationContextRef.order("SF10001", expiry()));
+        assertThat(response.knowledge().sources().getFirst().version()).isEqualTo("v2");
+        var flow = inOrder(orders, knowledge);
+        flow.verify(orders).getOwnedOrder(principal.getIdentity(), 100, "SF10001");
+        flow.verify(knowledge).answerProductDetailed(100, "蓝牙耳机", question);
+        verifyNoInteractions(orchestrator);
+    }
+
+    @Test
+    void oneClarificationDoesNotDestroyTheOrderNeededByTheNextProductQuestionOrRenewItsLifetime() {
+        var clarified = reply("它呢", null, orderContext());
+        assertThat(clarified.context()).isEqualTo(orderContext());
+        assertThat(clarified.reply()).contains("使用方法");
+        when(orders.getOwnedOrder(principal.getIdentity(), 100, "SF10001"))
+                .thenReturn(orderWithItems(new OrderItemSnapshot("蓝牙耳机", null, 1)));
+        when(knowledge.answerProductDetailed(100, "蓝牙耳机", "如何使用"))
+                .thenReturn(answer(SOURCE, "v1", "蓝牙耳机使用说明"));
+        assertThat(reply("如何使用", null, clarified.context()).reply()).contains("蓝牙耳机");
+        verifyNoInteractions(orchestrator);
+    }
+
+    @Test
+    void aDeletedOrNowForeignOrderNeverSuppliesAProductNameToKnowledge() {
+        when(orders.getOwnedOrder(principal.getIdentity(), 100, "SF10001"))
+                .thenThrow(new OrderNotFoundException());
+        assertThatThrownBy(() -> reply("如何使用", null, orderContext()))
+                .isInstanceOf(OrderNotFoundException.class);
+        verifyNoInteractions(knowledge, orchestrator);
+    }
+
+    @Test
+    void missingExpiredOrResetSubjectsAskForAProductRatherThanRejectingAnOrdinaryUsageQuestion() {
+        for (var previous : List.of(ConversationContextRef.none(), ConversationContextRef.order("SF10001", NOW))) {
+            var response = reply("如何使用", null, previous);
+            assertThat(response.reply()).contains("商品", "订单").doesNotContain("无法回复");
+            assertThat(response.context()).isEqualTo(ConversationContextRef.none());
+        }
+        var reset = new ConversationMessageRequest(UUID.randomUUID(), "如何使用", null, true);
+        assertThat(engine.reply(principal, 100, reset, orderContext()).context())
+                .isEqualTo(ConversationContextRef.none());
+        verifyNoInteractions(orders, knowledge, orchestrator);
+    }
+
+    @Test
+    void multiProductAndLegacyOrdersClarifyWithoutChoosingAnArbitraryItem() {
+        when(orders.getOwnedOrder(principal.getIdentity(), 100, "SF10001"))
+                .thenReturn(orderWithItems(new OrderItemSnapshot("蓝牙耳机", null, 1),
+                        new OrderItemSnapshot("无线鼠标", null, 1)))
+                .thenReturn(order("SF10001"));
+        var multiple = reply("如何使用", null, orderContext());
+        assertThat(multiple.reply()).contains("蓝牙耳机", "无线鼠标", "哪一件");
+        assertThat(multiple.context()).isEqualTo(orderContext());
+        var legacy = reply("如何使用", null, orderContext());
+        assertThat(legacy.reply()).contains("没有记录商品名称");
+        assertThat(legacy.context()).isEqualTo(orderContext());
+        verifyNoInteractions(knowledge, orchestrator);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"为什么", "然后呢", "再详细一点"})
+    void genericFollowupsClarifyWithinTheSameValidTopicEvenWithASelectedOrder(String text) {
+        assertThat(reply(text, "SF10001", orderContext()).context()).isEqualTo(orderContext());
+        assertThat(reply(text, null, knowledgeContext()).context()).isEqualTo(knowledgeContext());
+        verifyNoInteractions(knowledge, orders, orchestrator);
+    }
+
+    private static SupportOrder orderWithItems(OrderItemSnapshot... items) {
+        return new SupportOrder(1, 100, 200, 200, "SF10001", OrderStatus.SHIPPED,
+                new BigDecimal("99.00"), "CNY", NOW, NOW, null, List.of(items));
     }
 
     private ChatResponse reply(String text, String selectedOrder, ConversationContextRef previous) {

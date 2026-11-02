@@ -121,6 +121,7 @@ const {
   selectOrder,
   clearSelectedOrder,
   sendMessage,
+  stopReply,
   dismissError,
 } = useSupportDesk()
 
@@ -356,17 +357,20 @@ async function confirmDeleteConversation() {
   } else deleteError.value = error.value ?? '暂时无法删除对话，请稍后重试。'
 }
 
-watch([() => timelineMessages.value.length, busy], async () => {
-  if (loadingEarlier.value) return
-  await nextTick()
-  // Hidden panels have no scroll height. Follow new replies once chat is visible again.
-  if (activeView.value !== 'chat') {
-    conversationScrollPending = true
-    return
-  }
-  const element = messageList.value
-  if (element) element.scrollTop = element.scrollHeight
-})
+watch(
+  [() => timelineMessages.value.at(-1)?.text, () => timelineMessages.value.length, busy],
+  async () => {
+    if (loadingEarlier.value) return
+    await nextTick()
+    // Hidden panels have no scroll height. Follow new replies once chat is visible again.
+    if (activeView.value !== 'chat') {
+      conversationScrollPending = true
+      return
+    }
+    const element = messageList.value
+    if (element) element.scrollTop = element.scrollHeight
+  },
+)
 
 watch(
   [connected, shopId],
@@ -1030,6 +1034,8 @@ watch(
                 class="message"
                 :class="`message-${message.role}`"
                 data-testid="chat-message"
+                :data-streaming="message.streaming ? 'true' : undefined"
+                :aria-busy="message.streaming ? 'true' : undefined"
               >
                 <span
                   v-if="message.role === 'assistant'"
@@ -1053,7 +1059,10 @@ watch(
                     </span>
                     <time :datetime="message.createdAt">{{ formatTime(message.createdAt) }}</time>
                   </div>
-                  <div class="message-bubble">
+                  <div
+                    class="message-bubble"
+                    :data-testid="message.streaming ? 'streaming-reply' : undefined"
+                  >
                     <p>{{ message.text }}</p>
                   </div>
                   <div
@@ -1099,10 +1108,10 @@ watch(
               </article>
             </template>
             <div
-              v-if="busy"
+              v-if="busy && !timelineMessages.some((message) => message.streaming)"
               class="message message-assistant"
               role="status"
-              aria-label="正在查询订单"
+              aria-label="正在准备回复"
             >
               <span class="message-avatar">
                 <Sparkles
@@ -1116,7 +1125,7 @@ watch(
                   <span></span>
                   <span></span>
                   <span></span>
-                  <span class="typing-label">正在为你查询</span>
+                  <span class="typing-label">正在准备回复</span>
                 </div>
               </div>
             </div>
@@ -1179,6 +1188,15 @@ watch(
                     {{ messageDraft.length }}
                     <span>/{{ humanActive ? 2000 : 1000 }}</span>
                   </span>
+                  <button
+                    v-if="busy"
+                    type="button"
+                    class="button button-secondary"
+                    data-testid="stop-reply"
+                    @click="stopReply"
+                  >
+                    停止输出
+                  </button>
                   <button
                     type="submit"
                     class="send-button"

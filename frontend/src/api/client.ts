@@ -39,6 +39,11 @@ import {
   KNOWLEDGE_IMPORT_MAX_BYTES,
 } from './knowledge'
 import { isOrderProductImageUrl } from '../productImages'
+import {
+  ConversationStreamError,
+  readConversationJson,
+  readConversationStream,
+} from './conversationStream'
 
 export class ApiError extends Error {
   constructor(
@@ -481,6 +486,7 @@ export class ApiClient {
   private sessionLogout: Promise<void> | null = null
   private sessionActive = false
   private closed = false
+  private readonly lifetime = new AbortController()
   private channel: BroadcastChannel | null = null
   private readonly sessionId = crypto.randomUUID()
   private static sessionQueue: Promise<void> = Promise.resolve()
@@ -558,6 +564,7 @@ export class ApiClient {
   /** Stop accepting responses without invalidating a newer identity in another browser tab. */
   dispose(): void {
     this.closed = true
+    this.lifetime.abort()
     this.credentials = null
     this.channel?.close()
     this.channel = null
@@ -1118,7 +1125,10 @@ export class ApiClient {
     orderNo?: string,
     signal?: AbortSignal,
     resetContext = false,
+    onDelta?: (text: string) => void,
   ): Promise<ConversationMessages> {
+    if (onDelta !== undefined && typeof onDelta !== 'function')
+      throw new ApiError('请选择有效的回复接收方式。')
     const path = `${this.conversationPath(shopId)}/${this.validConversationId(conversationId)}/messages`
     this.validConversationId(clientMessageId)
     if (!message.trim() || message.length > 1000) throw new ApiError('请输入 1–1000 个字符的消息。')
@@ -1127,11 +1137,16 @@ export class ApiClient {
     return this.queued(async () => {
       if (signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
       const csrf = await this.getCsrf(signal)
+      let streamedReply: string | null = null
       const data = await this.request(
         path,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', [csrf.headerName]: csrf.token },
+          headers: {
+            'Content-Type': 'application/json',
+            [csrf.headerName]: csrf.token,
+            ...(onDelta ? { Accept: 'text/event-stream, application/json;q=0.9' } : {}),
+          },
           body: JSON.stringify({
             clientMessageId,
             message,
@@ -1141,7 +1156,15 @@ export class ApiClient {
         },
         signal,
         105_000, // The server's Agent deadline is at most 100s, including its bounded retries.
+        onDelta
+          ? async (response, streamSignal) => {
+              const stream = await readConversationStream(response, streamSignal, onDelta)
+              streamedReply = stream.reply
+              return stream.value
+            }
+          : undefined,
       )
+      if (signal?.aborted || this.closed) throw new DOMException('Request cancelled', 'AbortError')
       if (!isRecord(data))
         throw new ApiError('回复结果无法确认，请刷新咨询记录核实。', 0, 'INVALID_RESPONSE')
       const conversation = parseConversation(data.conversation, shopId)
@@ -1151,9 +1174,12 @@ export class ApiClient {
         messages.length !== 2 ||
         messages[0]?.role !== 'USER' ||
         messages[0].text !== message ||
-        messages[1]?.role !== 'ASSISTANT'
+        messages[1]?.role !== 'ASSISTANT' ||
+        (streamedReply !== null && messages[1].text !== streamedReply)
       )
         throw new ApiError('回复结果无法确认，请刷新咨询记录核实。', 0, 'INVALID_RESPONSE')
+      // Compatibility with an older JSON server uses this same POST response, never a retry.
+      if (onDelta && streamedReply === null && messages[1]?.text) onDelta(messages[1].text)
       return { conversation, messages }
     })
   }
@@ -1651,6 +1677,7 @@ export class ApiClient {
     init: RequestInit,
     signal?: AbortSignal,
     timeoutMillis = 25_000,
+    consumeStream?: (response: Response, signal: AbortSignal) => Promise<unknown>,
   ): Promise<unknown> {
     const sessionExchange = [
       '/api/v1/security/csrf',
@@ -1664,8 +1691,13 @@ export class ApiClient {
     )
       throw new ApiError('登录状态已失效，请重新登录。', 401, 'UNAUTHENTICATED')
     const deadline = AbortSignal.timeout(timeoutMillis)
-    const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline
+    const requestSignal = AbortSignal.any([
+      deadline,
+      ...(signal ? [signal] : []),
+      ...(!sessionExchange ? [this.lifetime.signal] : []),
+    ])
     try {
+      if (requestSignal.aborted) throw new DOMException('Request cancelled', 'AbortError')
       // Native browser fetch must not be invoked with the ApiClient instance as `this`.
       const fetchRequest = this.fetcher
       const response = await fetchRequest(path, {
@@ -1675,21 +1707,32 @@ export class ApiClient {
         redirect: 'error',
         signal: requestSignal,
         headers: {
+          Accept: 'application/json',
           ...init.headers,
           ...(this.authorization ? { Authorization: this.authorization } : {}),
           ...(this.sessionActive ? { 'X-Session-Account': this.expectedUsername } : {}),
-          Accept: 'application/json',
         },
       })
       const contentType = response.headers.get('content-type') ?? ''
+      if (
+        response.ok &&
+        consumeStream &&
+        contentType.split(';', 1)[0]?.trim() === 'text/event-stream'
+      )
+        return await consumeStream(response, requestSignal)
       if (response.status === 204 && response.ok) return undefined
       let data: unknown = null
       if (contentType.includes('application/json')) {
         try {
-          data = await response.json()
-        } catch {
+          data = consumeStream
+            ? await readConversationJson(response, requestSignal)
+            : await response.json()
+        } catch (failure) {
+          if (requestSignal.aborted) throw failure
           throw new ApiError('服务返回的数据格式不正确，请稍后重试。', 0, 'INVALID_RESPONSE')
         }
+      } else if (consumeStream) {
+        await response.body?.cancel().catch(() => undefined)
       }
       if (!response.ok) {
         const serverMessage =
@@ -1730,9 +1773,16 @@ export class ApiClient {
         throw new ApiError('服务返回的数据格式不正确，请检查后端地址。', 0, 'INVALID_RESPONSE')
       return data
     } catch (error) {
-      if (signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
+      if (signal?.aborted || (!sessionExchange && this.lifetime.signal.aborted))
+        throw new DOMException('Request cancelled', 'AbortError')
       if (error instanceof ApiError) throw error
       if (deadline.aborted) throw new ApiError('请求超时，请稍后重试。', 0, 'TIMEOUT')
+      if (error instanceof ConversationStreamError)
+        throw new ApiError(
+          '回复输出已中断，请刷新咨询记录核实，不要重复发送。',
+          0,
+          'STREAM_INTERRUPTED',
+        )
       throw new ApiError('无法连接后端服务，请检查后端是否启动及代理地址。', 0, 'NETWORK_ERROR')
     }
   }

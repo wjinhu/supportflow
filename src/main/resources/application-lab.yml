@@ -13,6 +13,13 @@ spring:
       validation-timeout: 1000
   flyway:
     enabled: false
+  data:
+    redis:
+      host: "${SUPPORTFLOW_REDIS_HOST:redis}"
+      port: "${SUPPORTFLOW_REDIS_PORT:6379}"
+      password: "${lab_redis_password:}"
+      connect-timeout: 1s
+      timeout: 2s
   lifecycle:
     timeout-per-shutdown-phase: 20s
 
@@ -50,7 +57,7 @@ management:
         liveness:
           include: livenessState
         readiness:
-          include: readinessState,db
+          include: "${SUPPORTFLOW_READINESS_COMPONENTS:readinessState,db}"
     prometheus:
       access: read-only
     metrics:
@@ -80,6 +87,10 @@ supportflow:
     execution:
       enabled: true
   security:
+    session:
+      redis:
+        enabled: "${SUPPORTFLOW_REDIS_SESSION_ENABLED:false}"
+        namespace: "${SUPPORTFLOW_REDIS_NAMESPACE:supportflow:lab:session}"
     authentication:
       mode: database
       basic-enabled: false

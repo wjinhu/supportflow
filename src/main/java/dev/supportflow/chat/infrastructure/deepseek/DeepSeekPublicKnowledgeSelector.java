@@ -20,6 +20,7 @@ import java.util.regex.Pattern;
 
 /** Only canonical public references + this question can leave the process; Java retains complete source conditions. */
 public final class DeepSeekPublicKnowledgeSelector implements PublicKnowledgeSelector {
+    private static final PublicReferenceCatalog REFERENCES = new PublicReferenceCatalog();
     private static final Pattern LOCAL_ONLY = Pattern.compile(
             "订单|买家|客户|账号|账户|电话|手机号码|身份证|住址|地址|密码|密钥|退款|退货|售后|物流|审批|支付|到账|"
                     + "系统提示|忽略.{0,24}(规则|指令)|绕过|执行|@|\\d{7,}|"
@@ -38,7 +39,6 @@ public final class DeepSeekPublicKnowledgeSelector implements PublicKnowledgeSel
     private final DeepSeekProperties properties;
     private final ObjectMapper json;
     private final ObjectReader strict;
-    private final PublicReferenceCatalog references = new PublicReferenceCatalog();
 
     public DeepSeekPublicKnowledgeSelector(DeepSeekCallExecutor executor, ObjectMapper json, DeepSeekProperties properties) {
         this.executor = java.util.Objects.requireNonNull(executor);
@@ -49,14 +49,8 @@ public final class DeepSeekPublicKnowledgeSelector implements PublicKnowledgeSel
     }
 
     @Override public Optional<List<String>> select(long shopId, String question, List<KnowledgeMatch> matches) {
-        if (shopId <= 0 || question == null || question.length() > 1000
-                || Normalizer.normalize(question, Normalizer.Form.NFKC).isBlank()
-                || LOCAL_ONLY.matcher(question).find() || !ExplicitOrderNumbers.extract(question).isEmpty()
-                || matches == null || matches.isEmpty() || matches.size() > 2) return Optional.empty();
-        var allowed = new HashSet<String>();
-        // Reject mixed/private/forged sets as a whole; never partially transmit a private match.
-        for (KnowledgeMatch match : matches)
-            if (!references.containsExact(shopId, match) || !allowed.add(match.sourceId())) return Optional.empty();
+        if (!permits(shopId, question, matches)) return Optional.empty();
+        var allowed = matches.stream().map(KnowledgeMatch::sourceId).collect(java.util.stream.Collectors.toSet());
         try {
             var documents = matches.stream().map(match -> Map.of("sourceId", match.sourceId(), "version", match.version(),
                     "title", match.title(), "content", match.content())).toList();
@@ -71,6 +65,19 @@ public final class DeepSeekPublicKnowledgeSelector implements PublicKnowledgeSel
             // No provider/parser payload or cause is propagated; no retry or business replay.
             return Optional.empty();
         }
+    }
+
+    /** Shared egress policy for protocol adapters. A mixed/private/forged set fails as a whole. */
+    public static boolean permits(long shopId, String question, List<KnowledgeMatch> matches) {
+        if (shopId <= 0 || question == null || question.length() > 1000
+                || Normalizer.normalize(question, Normalizer.Form.NFKC).isBlank()
+                || LOCAL_ONLY.matcher(question).find() || !ExplicitOrderNumbers.extract(question).isEmpty()
+                || matches == null || matches.isEmpty() || matches.size() > 2) return false;
+        var allowed = new HashSet<String>();
+        // Reject mixed/private/forged sets as a whole; never partially transmit a private match.
+        for (KnowledgeMatch match : matches)
+            if (match == null || !REFERENCES.containsExact(shopId, match) || !allowed.add(match.sourceId())) return false;
+        return true;
     }
 
     List<String> parse(byte[] bytes, Set<String> allowed) {

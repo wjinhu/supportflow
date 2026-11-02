@@ -11,6 +11,8 @@ const requests = []
 const conversations = new Map()
 const support = new Map()
 const pendingReplies = new WeakMap()
+const replyModes = new WeakMap()
+const streamPlans = new Map()
 const nextCursor = 7347
 const timestamp = '2026-10-20T01:00:00Z'
 const makeOrder = (shopId, orderNo, overrides = {}) => ({
@@ -60,11 +62,48 @@ function respond(response, status, value) {
     pending.stored.results.set(pending.body.clientMessageId, { body: pending.body, value })
     pendingReplies.delete(response)
   }
+  const mode = replyModes.get(response)
+  if (status === 200 && mode?.stream && value?.messages) {
+    return streamTurn(response, value, mode.plan)
+  }
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
   })
   response.end(JSON.stringify(value))
+}
+
+function streamEvent(response, event, data) {
+  if (!response.destroyed && !response.writableEnded)
+    response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+}
+
+function streamTurn(response, turn, plan) {
+  const reply = turn.messages.find((message) => message.role === 'ASSISTANT').text
+  const codePoints = Array.from(reply)
+  const parts =
+    plan?.parts ??
+    Array.from({ length: Math.ceil(codePoints.length / 16) }, (_, i) =>
+      codePoints.slice(i * 16, (i + 1) * 16).join(''),
+    )
+  response.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Accel-Buffering': 'no',
+  })
+  response.flushHeaders()
+  const stream = { response, turn, parts, emittedParts: 0, completed: false, closed: false }
+  response.once('close', () => {
+    stream.closed = true
+  })
+  if (plan) {
+    plan.active = stream
+    streamEvent(response, 'delta', { text: parts[stream.emittedParts++] })
+    return
+  }
+  for (const text of parts) streamEvent(response, 'delta', { text })
+  streamEvent(response, 'completed', turn)
+  response.end()
 }
 
 function failure(response, status, code, message) {
@@ -97,6 +136,8 @@ const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://127.0.0.1')
   if (url.pathname === '/__e2e/health') return respond(response, 200, { ready: true })
   if (url.pathname === '/__e2e/reset' && request.method === 'POST') {
+    for (const plan of streamPlans.values()) plan.active?.response.end()
+    streamPlans.clear()
     sessions.clear()
     conversations.clear()
     support.clear()
@@ -104,6 +145,45 @@ const server = http.createServer(async (request, response) => {
     return respond(response, 200, { reset: true })
   }
   if (url.pathname === '/__e2e/requests') return respond(response, 200, requests)
+  // Controlled test-only transport gates prove rendering before completion without sleeps.
+  if (url.pathname === '/__e2e/stream-plan' && request.method === 'POST') {
+    const plan = await bodyOf(request)
+    if (
+      !plan.message ||
+      !Array.isArray(plan.parts) ||
+      !plan.parts.length ||
+      !plan.parts.every((part) => typeof part === 'string' && part.length > 0) ||
+      plan.answer?.reply !== plan.parts.join('')
+    )
+      return failure(response, 400, 'INVALID_FIXTURE', 'Invalid stream fixture')
+    streamPlans.set(plan.message, plan)
+    return respond(response, 200, { ready: true })
+  }
+  if (url.pathname === '/__e2e/stream-status' && request.method === 'GET') {
+    const stream = streamPlans.get(url.searchParams.get('message'))?.active
+    return respond(response, 200, {
+      started: !!stream,
+      closed: stream?.closed ?? false,
+      completed: stream?.completed ?? false,
+      emittedParts: stream?.emittedParts ?? 0,
+    })
+  }
+  if (url.pathname === '/__e2e/stream-release' && request.method === 'POST') {
+    const { message, action } = await bodyOf(request)
+    const stream = streamPlans.get(message)?.active
+    if (!stream) return failure(response, 404, 'NOT_STARTED', 'Stream has not started')
+    if (action === 'truncate') stream.response.end()
+    else if (action === 'next' && stream.emittedParts < stream.parts.length)
+      streamEvent(stream.response, 'delta', { text: stream.parts[stream.emittedParts++] })
+    else if (action === 'complete') {
+      while (stream.emittedParts < stream.parts.length)
+        streamEvent(stream.response, 'delta', { text: stream.parts[stream.emittedParts++] })
+      streamEvent(stream.response, 'completed', stream.turn)
+      stream.completed = true
+      stream.response.end()
+    } else return failure(response, 400, 'INVALID_ACTION', 'Invalid stream action')
+    return respond(response, 200, { released: true })
+  }
 
   const sessionId = cookies(request).JSESSIONID
   let session = sessions.get(sessionId)
@@ -123,6 +203,7 @@ const server = http.createServer(async (request, response) => {
     hasAuthorization: !!request.headers.authorization,
     hasSessionCookie: !!session,
     hasCsrf,
+    acceptsEventStream: (request.headers.accept ?? '').includes('text/event-stream'),
     accepted: false,
   }
   requests.push(record)
@@ -524,6 +605,11 @@ const server = http.createServer(async (request, response) => {
     return failure(response, 400, 'INVALID_ARGUMENT', '消息不能为空且不能超过1000字。')
   }
   record.accepted = true
+  const streamPlan = streamPlans.get(body.message)
+  replyModes.set(response, {
+    stream: !!stored && (request.headers.accept ?? '').includes('text/event-stream'),
+    plan: streamPlan,
+  })
   if (stored) {
     if (typeof body.clientMessageId !== 'string')
       return failure(response, 400, 'INVALID_ARGUMENT', '消息编号不正确。')
@@ -537,6 +623,7 @@ const server = http.createServer(async (request, response) => {
   }
   const shopId = Number(match[1])
   const message = body.message.trim()
+  if (streamPlan) return respond(response, 200, streamPlan.answer)
   if (message === '触发401')
     return failure(response, 401, 'UNAUTHENTICATED', '登录状态已失效，请重新连接账号。')
   if (message === '触发403')
