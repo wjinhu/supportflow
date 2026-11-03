@@ -126,7 +126,8 @@ test('request deadline aborts a real local body stalled after HTTP 200 headers',
     response.writeHead(200, { 'content-type': 'application/json', 'x-supportflow-environment': 'isolated-lab' });
     response.write('{');
   }, async origin => {
-    const result = await requestGet({ timeoutMs: 80,
+    // Allow local connection/header scheduling; the body deliberately never completes.
+    const result = await requestGet({ timeoutMs: 1000,
       fetchImpl: (_fixedUrl, options) => fetch(origin, options) });
     assert.equal(result.kind, 'timeout');
     assert.equal(result.status, 200);

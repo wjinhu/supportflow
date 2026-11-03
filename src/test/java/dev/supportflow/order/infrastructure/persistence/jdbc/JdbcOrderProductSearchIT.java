@@ -72,7 +72,7 @@ class JdbcOrderProductSearchIT {
                     WHERE order_no='SFV16'
                     """)).isInstanceOfSatisfying(SQLException.class, error -> assertThat(error.getErrorCode()).isEqualTo(3819));
         }
-        assertThat(migration(null)).isEqualTo(6);
+        assertThat(migration(null)).isEqualTo(7); // V17 through V23
         try (var connection = admin()) {
             OrderVisibilityFixtures.grantRead(connection, "order_product_test", "product_reader");
             HumanSupportFixtures.grantAiAdmission(connection, "order_product_test", "product_reader");

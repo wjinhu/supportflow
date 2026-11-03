@@ -903,6 +903,8 @@ test('order selection submits the scoped order and retains it for the next quest
   await expect(page.locator('.order-detail')).not.toBeVisible()
   await expect(page.getByTestId('chat-message').last()).toContainText('已发货')
   await send(page, '现在是什么状态？')
+  await expect(page.getByTestId('message-input')).toBeEnabled()
+  await expect(page.getByTestId('streaming-reply')).toHaveCount(0)
   await expect(page.getByTestId('chat-message').last()).toContainText('已发货')
   const bodies = (await recorded(request))
     .filter((entry) => entry.method === 'POST')
