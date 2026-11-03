@@ -93,6 +93,10 @@ export function useSupportDesk() {
   const humanRequesting = ref(false)
   const humanRequestUncertain = ref(false)
   let humanRequestId: string | null = null
+  const feedbackOpen = ref(false)
+  const feedbackSubmitting = ref(false)
+  const feedbackError = ref<string | null>(null)
+  const dismissedFeedback = new Set<string>()
   const human = useSupportChannel({
     scope: () =>
       `${connected.value}/${username.value}/${shopId.value}/${activeConversation.value?.id ?? ''}`,
@@ -122,11 +126,78 @@ export function useSupportDesk() {
       resetConversationContext()
     },
   })
+  const feedbackKey = () => `${username.value}/${shopId.value}/${human.session.value?.id ?? ''}`
+  watch(human.session, (session) => {
+    if (!session || session.status !== 'CLOSED' || session.feedback) {
+      feedbackOpen.value = false
+      return
+    }
+    if (
+      session.closeReason &&
+      session.closeReason !== 'MANUAL' &&
+      !dismissedFeedback.has(feedbackKey())
+    )
+      feedbackOpen.value = true
+  })
+  function openSupportFeedback() {
+    if (human.session.value?.status === 'CLOSED' && !human.session.value.feedback) {
+      feedbackError.value = null
+      feedbackOpen.value = true
+    }
+  }
+  function dismissSupportFeedback() {
+    if (feedbackSubmitting.value) return
+    dismissedFeedback.add(feedbackKey())
+    feedbackOpen.value = false
+  }
+  async function submitSupportFeedback(rating: number, comment: string) {
+    const session = human.session.value
+    if (
+      !client ||
+      !connected.value ||
+      !activeConversation.value ||
+      session?.status !== 'CLOSED' ||
+      session.feedback ||
+      feedbackSubmitting.value
+    )
+      return
+    const signal = context.signal
+    const key = feedbackKey()
+    feedbackSubmitting.value = true
+    feedbackError.value = null
+    try {
+      const rated = await client.rateSupport(
+        shopId.value,
+        activeConversation.value.id,
+        session.id,
+        rating,
+        comment,
+        signal,
+      )
+      if (signal.aborted || feedbackKey() !== key) return
+      human.session.value = rated
+      dismissedFeedback.add(key)
+      feedbackOpen.value = false
+    } catch (failure) {
+      if (!signal.aborted && feedbackKey() === key) {
+        feedbackError.value =
+          failure instanceof ApiError
+            ? failure.message
+            : '评价提交结果暂无法确认，请保留内容后重试。'
+        if (failure instanceof ApiError && failure.status === 401) report(failure, signal)
+      }
+    } finally {
+      if (!signal.aborted && feedbackKey() === key) feedbackSubmitting.value = false
+    }
+  }
   watch(
     () =>
       `${connected.value}/${username.value}/${shopId.value}/${activeConversation.value?.id ?? ''}`,
     () => {
       humanRequestId = null
+      feedbackOpen.value = false
+      feedbackSubmitting.value = false
+      feedbackError.value = null
       humanRequesting.value = false
       humanRequestUncertain.value = false
     },
@@ -1303,6 +1374,12 @@ export function useSupportDesk() {
   })
 
   return {
+    feedbackOpen,
+    feedbackSubmitting,
+    feedbackError,
+    openSupportFeedback,
+    dismissSupportFeedback,
+    submitSupportFeedback,
     humanSession: human.session,
     humanMessages: human.messages,
     humanNextBeforeId: human.nextBeforeId,

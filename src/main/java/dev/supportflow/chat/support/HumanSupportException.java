@@ -23,4 +23,7 @@ public final class HumanSupportException extends RuntimeException {
     public static HumanSupportException unavailable() {
         return new HumanSupportException(Code.HUMAN_SUPPORT_UNAVAILABLE, HttpStatus.SERVICE_UNAVAILABLE, "人工会话暂时不可用，请刷新后重试");
     }
+    public static HumanSupportException invalidFeedback() {
+        return new HumanSupportException(Code.HUMAN_SUPPORT_INVALID, HttpStatus.BAD_REQUEST, "请选择1至5星，并填写不超过500字的纯文本评价。");
+    }
 }

@@ -44,6 +44,7 @@ const sourceDocLinks = new Set([
   "src/main/java/dev/supportflow/order/infrastructure/persistence/jdbc/JdbcSupportOrderRepository.java",
   "src/main/resources/db/migration/V21__persistent_knowledge_vectors.sql",
   "src/main/resources/db/migration/V22__human_support_handoff.sql",
+  "src/main/resources/db/migration/V23__human_support_idle_feedback.sql",
   "src/test/java/dev/supportflow/assistant/aftersale/AfterSalePolicyTest.java",
   "src/test/java/dev/supportflow/assistant/knowledge/PersistentKnowledgeVectorIT.java",
   "src/test/java/dev/supportflow/assistant/knowledge/PublicKnowledgeServiceTest.java",

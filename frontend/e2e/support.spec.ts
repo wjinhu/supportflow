@@ -7,6 +7,54 @@ test.beforeEach(async ({ request, page }) => {
   await page.goto('/?shopId=100')
 })
 
+test('an idle closure received by polling opens feedback and an explicit rating closes the prompt', async ({
+  page,
+}, testInfo) => {
+  await connect(page)
+  await page.getByTestId('request-human-support').click()
+  await expect(page.getByTestId('buyer-support-status')).toContainText('正在等待店铺客服接待')
+  let closedSession: Record<string, unknown> | null = null
+  let feedback: { rating: number; comment: string; createdAt: string } | null = null
+  let feedbackWrites = 0
+  await page.route('**/chat/conversations/*/support', async (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    const response = await route.fetch()
+    const body = await response.json()
+    if (body.session) {
+      closedSession = {
+        ...body.session,
+        status: 'CLOSED',
+        closeReason: 'INACTIVITY',
+        closedAt: new Date().toISOString(),
+        lastMessageAt: new Date(Date.now() - 300_000).toISOString(),
+        feedback,
+      }
+      await route.fulfill({ response, json: { ...body, session: closedSession } })
+    } else await route.fulfill({ response })
+  })
+  await page.route('**/support/*/feedback', async (route) => {
+    feedbackWrites++
+    const body = route.request().postDataJSON()
+    feedback = { rating: body.rating, comment: body.comment, createdAt: new Date().toISOString() }
+    await route.fulfill({ json: { ...closedSession, feedback } })
+  })
+  const dialog = page.getByRole('dialog', { name: '客服评价', exact: true })
+  await expect(dialog).toBeVisible({ timeout: 10_000 })
+  await expect(dialog).toContainText('连续5分钟没有新消息')
+  await expect(dialog).toContainText('等待体验')
+  expect(feedbackWrites).toBe(0)
+  await dialog.getByRole('radio', { name: '4星', exact: true }).check()
+  await dialog.getByTestId('support-feedback-comment').fill('希望接待更及时')
+  await page.screenshot({
+    path: testInfo.outputPath('idle-human-support-feedback.png'),
+    fullPage: true,
+  })
+  await dialog.getByTestId('submit-support-feedback').click()
+  await expect(dialog).not.toBeVisible()
+  await expect(page.getByTestId('buyer-support-status')).toContainText('已评价：4星')
+  expect(feedbackWrites).toBe(1)
+})
+
 test('buyer explicitly requests support, staff claims and replies, close restores AI with both histories', async ({
   page,
   browser,

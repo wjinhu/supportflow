@@ -195,6 +195,9 @@ export interface SupportSession {
   createdAt: string
   updatedAt: string
   closedAt: string | null
+  lastMessageAt?: string
+  closeReason?: 'MANUAL' | 'BUYER' | 'STAFF' | 'INACTIVITY' | null
+  feedback?: { rating: number; comment: string; createdAt: string } | null
 }
 
 export interface SupportMessage {

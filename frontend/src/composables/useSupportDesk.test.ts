@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   requestSupport: vi.fn(),
   sendSupportMessage: vi.fn(),
   closeSupport: vi.fn(),
+  rateSupport: vi.fn(),
   getShopOrder: vi.fn(),
   allOrders: vi.fn(),
   chat: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock('../api/client', async (importOriginal) => {
       requestSupport = mocks.requestSupport
       sendSupportMessage = mocks.sendSupportMessage
       closeSupport = mocks.closeSupport
+      rateSupport = mocks.rateSupport
       getShopOrder = mocks.getShopOrder
       allOrders = mocks.allOrders
       chat = mocks.chat
@@ -191,6 +193,40 @@ const createDesk = () => {
 }
 
 describe('explicit human handoff', () => {
+  it('offers feedback when a polled session times out and saves it only after explicit submission', async () => {
+    const desk = createDesk()
+    await desk.connect('buyer', 'test')
+    const closed = {
+      id: crypto.randomUUID(),
+      status: 'CLOSED' as const,
+      assigned: false,
+      assignedToMe: false,
+      createdAt: conversation.createdAt,
+      updatedAt: conversation.createdAt,
+      closedAt: conversation.createdAt,
+      closeReason: 'INACTIVITY' as const,
+      feedback: null,
+    }
+    mocks.supportSnapshot.mockResolvedValue({ session: closed, messages: [], nextBeforeId: null })
+    await desk.refreshHumanSupport()
+    await nextTick()
+    expect(desk.feedbackOpen.value).toBe(true)
+    expect(mocks.rateSupport).not.toHaveBeenCalled()
+    desk.dismissSupportFeedback()
+    await desk.refreshHumanSupport()
+    await nextTick()
+    expect(desk.feedbackOpen.value).toBe(false)
+    desk.openSupportFeedback()
+    const rated = {
+      ...closed,
+      feedback: { rating: 5, comment: '满意', createdAt: conversation.createdAt },
+    }
+    mocks.rateSupport.mockResolvedValue(rated)
+    await desk.submitSupportFeedback(5, '满意')
+    expect(desk.humanSession.value?.feedback?.rating).toBe(5)
+    expect(desk.feedbackOpen.value).toBe(false)
+    expect(mocks.rateSupport).toHaveBeenCalledOnce()
+  })
   it('requests a human, sends only human messages while waiting, blocks delete, then restores AI after close', async () => {
     const timestamp = '2026-10-30T00:00:00Z'
     const session = {
@@ -306,6 +342,7 @@ beforeEach(() => {
   mocks.requestSupport.mockReset()
   mocks.sendSupportMessage.mockReset()
   mocks.closeSupport.mockReset()
+  mocks.rateSupport.mockReset()
   mocks.logout.mockReset().mockResolvedValue(undefined)
   mocks.dispose.mockReset()
   mocks.options.mockReset()
@@ -383,7 +420,11 @@ describe('streamed assistant replies', () => {
     await sending
     expect(desk.messages.value.map((item) => item.id)).toEqual(canonical.map((item) => item.id))
     expect(desk.messages.value.some((item) => item.pending || item.streaming)).toBe(false)
-    mocks.shopWindowMessages.mockResolvedValue({ conversation, messages: canonical, nextBeforeId: null })
+    mocks.shopWindowMessages.mockResolvedValue({
+      conversation,
+      messages: canonical,
+      nextBeforeId: null,
+    })
     await desk.loadEarlierMessages(false)
     await desk.loadEarlierMessages(false)
     expect(desk.messages.value.map((item) => item.id)).toEqual(canonical.map((item) => item.id))

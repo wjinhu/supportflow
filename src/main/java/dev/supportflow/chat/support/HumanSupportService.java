@@ -30,12 +30,14 @@ import static dev.supportflow.chat.support.HumanSupportModels.*;
 @Service
 public class HumanSupportService {
     static final int PAGE_SIZE = 30;
-    private static final String SESSION_COLUMNS = "s.id,s.public_id,s.conversation_id,s.status,s.assigned_staff_id,s.created_at,s.updated_at,s.closed_at";
+    private static final String SESSION_COLUMNS = "s.id,s.public_id,s.conversation_id,s.status,s.assigned_staff_id,s.created_at,s.updated_at,s.closed_at,s.last_message_at,s.close_reason,s.rating,s.rating_comment,s.rated_at";
     private static final String MESSAGE_COLUMNS = "id,public_id,client_message_id,role,text,created_at";
     private static final RowMapper<StoredSession> SESSION_MAPPER = (row, ignored) -> new StoredSession(
             row.getLong("id"), UUID.fromString(row.getString("public_id")), row.getLong("conversation_id"),
             Status.valueOf(row.getString("status")), row.getObject("assigned_staff_id", Long.class),
-            instant(row, "created_at"), instant(row, "updated_at"), instant(row, "closed_at"));
+            instant(row, "created_at"), instant(row, "updated_at"), instant(row, "closed_at"), instant(row, "last_message_at"),
+            row.getString("close_reason") == null ? null : CloseReason.valueOf(row.getString("close_reason")),
+            row.getObject("rating", Integer.class) == null ? null : new FeedbackView(row.getInt("rating"), row.getString("rating_comment"), instant(row, "rated_at")));
     private static final RowMapper<MessageView> MESSAGE_MAPPER = (row, ignored) -> new MessageView(
             UUID.fromString(row.getString("public_id")), UUID.fromString(row.getString("client_message_id")),
             Role.valueOf(row.getString("role")), row.getString("text"), instant(row, "created_at"));
@@ -107,18 +109,19 @@ public class HumanSupportService {
 
     public MessageView buyerSend(CustomerPrincipal principal, long shopId, UUID conversationId, UUID sessionId, MessageRequest request) {
         validate(request);
-        return transaction.execute(state -> {
+        MessageView result = transaction.execute(state -> {
             long conversation = buyerConversation(principal, shopId, conversationId, true);
             StoredSession session = session(conversation, sessionId, true);
             return append(session, Role.BUYER, null, request);
         });
+        return requireSent(result);
     }
 
     public Snapshot buyerClose(CustomerPrincipal principal, long shopId, UUID conversationId, UUID sessionId) {
         return transaction.execute(state -> {
             long conversation = buyerConversation(principal, shopId, conversationId, true);
             StoredSession session = session(conversation, sessionId, true);
-            close(session);
+            if (!closeIfIdle(session)) close(session, CloseReason.BUYER);
             return buyerSnapshot(conversation, session(conversation, sessionId, false));
         });
     }
@@ -155,30 +158,34 @@ public class HumanSupportService {
 
     public Snapshot claim(CustomerPrincipal principal, long shopId, UUID sessionId) {
         merchants.requireChatShop(principal, shopId);
-        return transaction.execute(state -> {
+        Snapshot result = transaction.execute(state -> {
             long conversation = merchantConversation(shopId, sessionId, true);
             long staff = merchants.lockChatShop(principal, shopId).staffId();
             StoredSession session = session(conversation, sessionId, true);
             if (session.status() == Status.CLOSED) throw HumanSupportException.conflict("该人工会话已结束");
             if (session.staff() != null && session.staff() != staff) throw HumanSupportException.conflict("该会话已由其他客服接待");
+            if (closeIfIdle(session)) return null;
             if (session.status() == Status.WAITING) {
                 jdbc.sql("UPDATE support_human_session SET status='ACTIVE',assigned_staff_id=:staff,updated_at=UTC_TIMESTAMP(3) WHERE id=:id")
                         .param("staff", staff).param("id", session.storageId()).update();
             }
             return merchantSnapshot(session(conversation, sessionId, false), staff, null);
         });
+        if (result == null) throw HumanSupportException.conflict("该人工会话已因5分钟无消息自动结束");
+        return result;
     }
 
     public MessageView merchantSend(CustomerPrincipal principal, long shopId, UUID sessionId, MessageRequest request) {
         validate(request);
         merchants.requireChatShop(principal, shopId);
-        return transaction.execute(state -> {
+        MessageView result = transaction.execute(state -> {
             long conversation = merchantConversation(shopId, sessionId, true);
             long staff = merchants.lockChatShop(principal, shopId).staffId();
             StoredSession session = session(conversation, sessionId, true);
             requireAssigned(session, staff);
             return append(session, Role.STAFF, staff, request);
         });
+        return requireSent(result);
     }
 
     public Snapshot merchantClose(CustomerPrincipal principal, long shopId, UUID sessionId) {
@@ -188,7 +195,7 @@ public class HumanSupportService {
             long staff = merchants.lockChatShop(principal, shopId).staffId();
             StoredSession session = session(conversation, sessionId, true);
             requireAssigned(session, staff);
-            close(session);
+            if (!closeIfIdle(session)) close(session, CloseReason.STAFF);
             return merchantSnapshot(session(conversation, sessionId, false), staff, null);
         });
     }
@@ -205,6 +212,7 @@ public class HumanSupportService {
             return saved.view(); // Lost responses remain safely retryable after closure.
         }
         if (session.status() == Status.CLOSED) throw HumanSupportException.conflict("人工会话已结束，请重新转人工或使用AI客服");
+        if (closeIfIdle(session)) return null;
         UUID id = UUID.randomUUID();
         jdbc.sql("""
                 INSERT INTO support_human_message(public_id,client_message_id,conversation_id,session_id,role,sender_staff_id,text)
@@ -212,18 +220,80 @@ public class HumanSupportService {
                 """).param("id", id.toString()).param("client", request.clientMessageId().toString())
                 .param("conversation", session.conversation()).param("session", session.storageId()).param("role", role.name())
                 .param("staff", staff, Types.BIGINT).param("text", request.text()).update();
-        jdbc.sql("UPDATE support_human_session SET updated_at=UTC_TIMESTAMP(3) WHERE id=:id").param("id", session.storageId()).update();
+        jdbc.sql("UPDATE support_human_session SET last_message_at=UTC_TIMESTAMP(3),updated_at=UTC_TIMESTAMP(3) WHERE id=:id").param("id", session.storageId()).update();
         jdbc.sql("UPDATE support_chat_conversation SET updated_at=UTC_TIMESTAMP(3) WHERE id=:id").param("id", session.conversation()).update();
         return jdbc.sql("SELECT " + MESSAGE_COLUMNS + " FROM support_human_message WHERE public_id=:id")
                 .param("id", id.toString()).query(MESSAGE_MAPPER).single();
     }
 
-    private void close(StoredSession session) {
+    private void close(StoredSession session, CloseReason reason) {
         if (session.status() == Status.CLOSED) return;
-        jdbc.sql("UPDATE support_human_session SET status='CLOSED',active_slot=NULL,closed_at=UTC_TIMESTAMP(3),updated_at=UTC_TIMESTAMP(3) WHERE id=:id")
-                .param("id", session.storageId()).update();
+        jdbc.sql("UPDATE support_human_session SET status='CLOSED',active_slot=NULL,close_reason=:reason,closed_at=UTC_TIMESTAMP(3),updated_at=UTC_TIMESTAMP(3) WHERE id=:id")
+                .param("reason", reason.name()).param("id", session.storageId()).update();
         jdbc.sql("UPDATE support_chat_conversation SET updated_at=UTC_TIMESTAMP(3) WHERE id=:id").param("id", session.conversation()).update();
     }
+
+    private static MessageView requireSent(MessageView result) {
+        // Throw after the timeout closure commits, rather than rolling that closure back.
+        if (result == null) throw HumanSupportException.conflict("人工会话已因5分钟无消息自动结束，请重新转人工或使用智能客服");
+        return result;
+    }
+
+    private boolean closeIfIdle(StoredSession session) {
+        int changed = jdbc.sql("""
+                UPDATE support_human_session SET status='CLOSED',active_slot=NULL,close_reason='INACTIVITY',
+                    closed_at=UTC_TIMESTAMP(3),updated_at=UTC_TIMESTAMP(3)
+                WHERE id=:id AND status IN ('WAITING','ACTIVE') AND last_message_at<=UTC_TIMESTAMP(3)-INTERVAL 5 MINUTE
+                """).param("id", session.storageId()).update();
+        if (changed == 1) jdbc.sql("UPDATE support_chat_conversation SET updated_at=UTC_TIMESTAMP(3) WHERE id=:id")
+                .param("id", session.conversation()).update();
+        return changed == 1;
+    }
+
+    /** Each candidate is rechecked under the same scope -> conversation -> session locks as a send. */
+    public int expireInactive() {
+        var candidates = jdbc.sql("""
+                SELECT s.public_id,s.buyer_id,s.tenant_id,s.conversation_id FROM support_human_session s
+                JOIN support_chat_conversation c ON c.id=s.conversation_id
+                WHERE s.status IN ('WAITING','ACTIVE') AND s.last_message_at<=UTC_TIMESTAMP(3)-INTERVAL 5 MINUTE
+                    AND c.deleted_at IS NULL
+                ORDER BY s.last_message_at,s.id LIMIT 100
+                """).query((row, index) -> new IdleSession(UUID.fromString(row.getString(1)), row.getLong(2), row.getLong(3), row.getLong(4))).list();
+        int closed = 0;
+        for (var candidate : candidates) {
+            Boolean changed = transaction.execute(state -> {
+                HumanSupportScope.lock(jdbc, candidate.buyer(), candidate.shop());
+                var parent = jdbc.sql("SELECT id FROM support_chat_conversation WHERE id=:id AND buyer_id=:buyer AND tenant_id=:shop AND deleted_at IS NULL FOR UPDATE")
+                        .param("id", candidate.conversation()).param("buyer", candidate.buyer()).param("shop", candidate.shop()).query(Long.class).optional();
+                return parent.isPresent() && closeIfIdle(session(parent.get(), candidate.id(), true));
+            });
+            if (Boolean.TRUE.equals(changed)) closed++;
+        }
+        return closed;
+    }
+
+    public SessionView feedback(CustomerPrincipal principal, long shopId, UUID conversationId, UUID sessionId, FeedbackRequest request) {
+        String comment = request == null || request.comment() == null ? "" : request.comment().strip();
+        if (request == null || request.rating() == null || request.rating() < 1 || request.rating() > 5
+                || comment.length() > 500 || comment.matches("(?s).*<\\s*/?\\s*[A-Za-z][^>]*>.*")
+                || comment.codePoints().anyMatch(value -> Character.isISOControl(value) && value != '\n' && value != '\r' && value != '\t'))
+            throw HumanSupportException.invalidFeedback();
+        return transaction.execute(state -> {
+            long conversation = buyerConversation(principal, shopId, conversationId, true);
+            var session = session(conversation, sessionId, true);
+            if (session.status() != Status.CLOSED) throw HumanSupportException.conflict("人工服务结束后才能评价");
+            if (session.feedback() != null) {
+                if (session.feedback().rating() != request.rating() || !java.util.Objects.equals(session.feedback().comment(), comment))
+                    throw HumanSupportException.conflict("本次服务已经评价，不能重复修改");
+                return session.view(null);
+            }
+            jdbc.sql("UPDATE support_human_session SET rating=:rating,rating_comment=:comment,rated_at=UTC_TIMESTAMP(3) WHERE id=:id AND rating IS NULL")
+                    .param("rating", request.rating()).param("comment", comment).param("id", session.storageId()).update();
+            return session(conversation, sessionId, false).view(null);
+        });
+    }
+
+    private record IdleSession(UUID id, long buyer, long shop, long conversation) { }
 
     private long buyerConversation(CustomerPrincipal principal, long shop, UUID publicId, boolean lock) {
         if (principal == null || principal.getAccountType() != AccountType.BUYER) throw new AccessDeniedException("Buyer account required");
@@ -300,9 +370,11 @@ public class HumanSupportService {
     }
     private record StoredMessage(MessageView view, Long staff) { }
     private record StoredSession(long storageId, UUID id, long conversation, Status status, Long staff,
-                                 Instant created, Instant updated, Instant closed) {
+                                 Instant created, Instant updated, Instant closed, Instant lastMessage,
+                                 CloseReason closeReason, FeedbackView feedback) {
         SessionView view(Long viewer) {
-            return new SessionView(id, status, staff != null, staff != null && staff.equals(viewer), created, updated, closed);
+            return new SessionView(id, status, staff != null, staff != null && staff.equals(viewer), created, updated, closed,
+                    lastMessage, closeReason, feedback);
         }
     }
 }

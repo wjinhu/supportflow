@@ -7,6 +7,9 @@ spring:
   flyway:
     enabled: false
 supportflow:
+  human-support:
+    idle-scan:
+      enabled: false
   after-sale:
     execution:
       enabled: false

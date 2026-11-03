@@ -26,11 +26,18 @@ import AfterSalesPanel from './components/AfterSalesPanel.vue'
 import RefundDialog from './components/RefundDialog.vue'
 import ReceiptConfirmationDialog from './components/ReceiptConfirmationDialog.vue'
 import OrderDeletionDialog from './components/OrderDeletionDialog.vue'
+import SupportFeedbackDialog from './components/SupportFeedbackDialog.vue'
 import { formatAmount, formatDate, formatTime } from './components/format'
 import { useSupportDesk } from './composables/useSupportDesk'
 import type { ChatMessage, Order, OrderSelectionIntent } from './types'
 
 const {
+  feedbackOpen,
+  feedbackSubmitting,
+  feedbackError,
+  openSupportFeedback,
+  dismissSupportFeedback,
+  submitSupportFeedback,
   activeConversation,
   humanSession,
   humanMessages,
@@ -402,6 +409,14 @@ watch(
 </script>
 
 <template>
+  <SupportFeedbackDialog
+    :open="feedbackOpen"
+    :session="humanSession"
+    :submitting="feedbackSubmitting"
+    :error="feedbackError"
+    @close="dismissSupportFeedback"
+    @submit="submitSupportFeedback"
+  />
   <div class="app-shell">
     <aside
       class="navigation-rail"
@@ -880,7 +895,21 @@ watch(
             </template>
             <template v-else>
               <span v-if="humanSession?.status === 'CLOSED'">
-                人工服务已结束，可继续咨询智能客服。
+                {{
+                  humanSession.closeReason === 'INACTIVITY'
+                    ? '人工服务已结束：连续5分钟没有新消息，已自动结束服务。'
+                    : '人工服务已结束，可继续咨询智能客服。'
+                }}
+              </span>
+              <button
+                v-if="humanSession?.status === 'CLOSED' && !humanSession.feedback"
+                type="button"
+                @click="openSupportFeedback"
+              >
+                评价本次服务
+              </button>
+              <span v-if="humanSession?.feedback">
+                已评价：{{ humanSession.feedback.rating }}星
               </span>
               <button
                 type="button"

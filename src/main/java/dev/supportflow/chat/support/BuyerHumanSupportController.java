@@ -43,4 +43,10 @@ public class BuyerHumanSupportController {
                           @PathVariable @Positive long shopId, @PathVariable String conversationId, @PathVariable String sessionId) {
         return service.buyerClose(principal, shopId, ConversationIds.parse(conversationId), ConversationIds.parse(sessionId));
     }
+    @PostMapping("/{sessionId}/feedback")
+    public SessionView feedback(@AuthenticationPrincipal(errorOnInvalidType = true) CustomerPrincipal principal,
+                                @PathVariable @Positive long shopId, @PathVariable String conversationId,
+                                @PathVariable String sessionId, @Valid @RequestBody FeedbackRequest request) {
+        return service.feedback(principal, shopId, ConversationIds.parse(conversationId), ConversationIds.parse(sessionId), request);
+    }
 }

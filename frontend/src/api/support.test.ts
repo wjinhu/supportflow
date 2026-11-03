@@ -21,6 +21,63 @@ const csrf = () =>
   json({ token: 'fresh-token', headerName: 'X-CSRF-TOKEN', parameterName: '_csrf' })
 
 describe('human support API boundaries', () => {
+  it('submits a closed-session rating with fresh CSRF and verifies the exact result', async () => {
+    const rated = {
+      ...session,
+      status: 'CLOSED',
+      closedAt: timestamp,
+      closeReason: 'INACTIVITY',
+      feedback: { rating: 5, comment: '满意', createdAt: timestamp },
+    }
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(csrf())
+      .mockResolvedValueOnce(json(rated))
+    const result = await new ApiClient('buyer', 'test', fetcher).rateSupport(
+      '100',
+      conversationId,
+      sessionId,
+      5,
+      ' 满意 ',
+    )
+    expect(result.feedback?.rating).toBe(5)
+    expect(fetcher.mock.calls[1]![0]).toBe(
+      `/api/v1/shops/100/chat/conversations/${conversationId}/support/${sessionId}/feedback`,
+    )
+    expect(JSON.parse(fetcher.mock.calls[1]![1]!.body as string)).toEqual({
+      rating: 5,
+      comment: '满意',
+    })
+  })
+  it.each([0, 6, 1.5, Number.NaN])('rejects invalid stars before sending: %s', async (rating) => {
+    const fetcher = vi.fn<typeof fetch>()
+    await expect(
+      new ApiClient('buyer', 'test', fetcher).rateSupport(
+        '100',
+        conversationId,
+        sessionId,
+        rating,
+        '',
+      ),
+    ).rejects.toThrow()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+  it('rejects a feedback result belonging to another session', async () => {
+    const rated = {
+      ...session,
+      id: messageId,
+      status: 'CLOSED',
+      closedAt: timestamp,
+      feedback: { rating: 5, comment: '', createdAt: timestamp },
+    }
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(csrf())
+      .mockResolvedValueOnce(json(rated))
+    await expect(
+      new ApiClient('buyer', 'test', fetcher).rateSupport('100', conversationId, sessionId, 5, ''),
+    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+  })
   it('loads the order browser with a scoped read and rejects cross-shop items', async () => {
     const fetcher = vi
       .fn<typeof fetch>()

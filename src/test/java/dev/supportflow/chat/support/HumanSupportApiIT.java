@@ -110,6 +110,101 @@ class HumanSupportApiIT extends SpringContainerTest {
         merchantBase = "/api/v1/merchant/shops/" + shop + "/support-sessions";
     }
 
+    @Test void waitingAndAssignedSessionsExpireFromTheirLastMessageAndPreserveHistory() throws Exception {
+        UUID session = humans.start(buyer(), shop, conversation, new StartRequest(UUID.randomUUID())).session().id();
+        humans.buyerSend(buyer(), shop, conversation, session, new MessageRequest(UUID.randomUUID(), "请核实商品"));
+        idle(session);
+        assertThat(humans.expireInactive()).isPositive();
+        var expired = humans.buyerSnapshot(buyer(), shop, conversation);
+        assertThat(expired.session().status()).isEqualTo(Status.CLOSED);
+        assertThat(expired.session().closeReason()).isEqualTo(CloseReason.INACTIVITY);
+        assertThat(expired.messages()).extracting(MessageView::text).containsExactly("请核实商品");
+        humans.expireInactive();
+        assertThat(humans.buyerSnapshot(buyer(), shop, conversation).session().closedAt()).isEqualTo(expired.session().closedAt());
+        UUID next = humans.start(buyer(), shop, conversation, new StartRequest(UUID.randomUUID())).session().id();
+        humans.claim(staff(999), shop, next);
+        idle(next);
+        humans.expireInactive();
+        assertThat(humans.buyerSnapshot(buyer(), shop, conversation).session().status()).isEqualTo(Status.CLOSED);
+    }
+
+    @Test void claimReadsAndDuplicateMessagesDoNotCountAsNewActivity() {
+        UUID session = humans.start(buyer(), shop, conversation, new StartRequest(UUID.randomUUID())).session().id();
+        jdbc.sql("UPDATE support_human_session SET last_message_at=UTC_TIMESTAMP(3)-INTERVAL 4 MINUTE WHERE public_id=:id").param("id", session.toString()).update();
+        var before = humans.buyerSnapshot(buyer(), shop, conversation).session().lastMessageAt();
+        humans.claim(staff(999), shop, session);
+        assertThat(humans.buyerSnapshot(buyer(), shop, conversation).session().lastMessageAt()).isEqualTo(before);
+        var message = new MessageRequest(UUID.randomUUID(), "这是一条新消息");
+        humans.buyerSend(buyer(), shop, conversation, session, message);
+        assertThat(humans.buyerSnapshot(buyer(), shop, conversation).session().lastMessageAt()).isAfter(before);
+        jdbc.sql("UPDATE support_human_session SET last_message_at=UTC_TIMESTAMP(3)-INTERVAL 4 MINUTE WHERE public_id=:id").param("id", session.toString()).update();
+        var aged = humans.buyerSnapshot(buyer(), shop, conversation).session().lastMessageAt();
+        humans.buyerSend(buyer(), shop, conversation, session, message);
+        assertThat(humans.buyerSnapshot(buyer(), shop, conversation).session().lastMessageAt()).isEqualTo(aged);
+        humans.merchantSend(staff(999), shop, session, new MessageRequest(UUID.randomUUID(), "客服已收到"));
+        assertThat(humans.buyerSnapshot(buyer(), shop, conversation).session().lastMessageAt()).isAfter(aged);
+    }
+
+    @Test void lateMessagesAreRejectedAfterCommittingTimeoutClosure() {
+        UUID session = humans.start(buyer(), shop, conversation, new StartRequest(UUID.randomUUID())).session().id();
+        idle(session);
+        assertThatThrownBy(() -> humans.buyerSend(buyer(), shop, conversation, session, new MessageRequest(UUID.randomUUID(), "迟到的消息")))
+                .isInstanceOf(HumanSupportException.class);
+        var snapshot = humans.buyerSnapshot(buyer(), shop, conversation);
+        assertThat(snapshot.session().status()).isEqualTo(Status.CLOSED);
+        assertThat(snapshot.session().closeReason()).isEqualTo(CloseReason.INACTIVITY);
+        assertThat(snapshot.messages()).isEmpty();
+    }
+
+    @Test void feedbackIsOwnedClosedOnlyImmutableAndIdempotent() throws Exception {
+        UUID session = humans.start(buyer(), shop, conversation, new StartRequest(UUID.randomUUID())).session().id();
+        mvc.perform(post(buyerBase + "/" + session + "/feedback").with(httpBasic("buyer", PASSWORD)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"rating\":5,\"comment\":\"满意\"}"))
+                .andExpect(status().isConflict());
+        humans.buyerClose(buyer(), shop, conversation, session);
+        var request = new FeedbackRequest(5, " 满意 ");
+        var first = humans.feedback(buyer(), shop, conversation, session, request);
+        assertThat(first.feedback().comment()).isEqualTo("满意");
+        assertThat(humans.feedback(buyer(), shop, conversation, session, request).feedback()).isEqualTo(first.feedback());
+        assertThatThrownBy(() -> humans.feedback(buyer(), shop, conversation, session, new FeedbackRequest(1, "修改")))
+                .isInstanceOf(HumanSupportException.class);
+        assertThatThrownBy(() -> humans.feedback(other(), shop, conversation, session, request)).isInstanceOf(HumanSupportException.class);
+        assertThatThrownBy(() -> humans.feedback(buyer(), shop + 1, conversation, session, request)).isInstanceOf(HumanSupportException.class);
+        mvc.perform(post(buyerBase + "/" + session + "/feedback").with(httpBasic("support", PASSWORD)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"rating\":5}"))
+                .andExpect(status().isForbidden());
+        for (String invalid : List.of("{\"rating\":0}", "{\"rating\":6}", "{\"rating\":4.5}", "{\"rating\":\"5\"}", "{}",
+                "{\"rating\":5,\"comment\":\"<script>test</script>\"}", json.writeValueAsString(Map.of("rating", 5, "comment", "x".repeat(501))))) {
+            mvc.perform(post(buyerBase + "/" + session + "/feedback").with(httpBasic("buyer", PASSWORD)).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content(invalid)).andExpect(status().isBadRequest());
+        }
+        UUID next = humans.start(buyer(), shop, conversation, new StartRequest(UUID.randomUUID())).session().id();
+        assertThat(humans.feedback(buyer(), shop, conversation, session, request).id()).isEqualTo(session);
+        assertThat(humans.buyerSnapshot(buyer(), shop, conversation).session().id()).isEqualTo(next);
+    }
+
+    @Test void concurrentIdleScanAndLateSendCannotWriteIntoAnExpiredSession() throws Exception {
+        UUID session = humans.start(buyer(), shop, conversation, new StartRequest(UUID.randomUUID())).session().id();
+        humans.claim(staff(999), shop, session);
+        idle(session);
+        var scanner = CompletableFuture.runAsync(() -> humans.expireInactive());
+        var sender = CompletableFuture.supplyAsync(() -> {
+            try { humans.buyerSend(buyer(), shop, conversation, session, new MessageRequest(UUID.randomUUID(), "超时后并发发送")); return true; }
+            catch (HumanSupportException closed) { return false; }
+        });
+        scanner.get(10, TimeUnit.SECONDS);
+        assertThat(sender.get(10, TimeUnit.SECONDS)).isFalse();
+        var snapshot = humans.buyerSnapshot(buyer(), shop, conversation);
+        assertThat(snapshot.session().status()).isEqualTo(Status.CLOSED);
+        assertThat(snapshot.session().closeReason()).isEqualTo(CloseReason.INACTIVITY);
+        assertThat(snapshot.messages()).isEmpty();
+    }
+
+    private void idle(UUID session) {
+        jdbc.sql("UPDATE support_human_session SET last_message_at=UTC_TIMESTAMP(3)-INTERVAL 6 MINUTE WHERE public_id=:id")
+                .param("id", session.toString()).update();
+    }
+
     @Test void completeHandoffIsDurableIdempotentAndReturnsToAi() throws Exception {
         UUID request = UUID.randomUUID();
         JsonNode started = postAs(buyerBase, "buyer", Map.of("requestId", request));

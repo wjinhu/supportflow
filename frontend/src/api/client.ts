@@ -275,7 +275,20 @@ function parseSupportSession(value: unknown): SupportSession {
     !isTimestamp(value.createdAt) ||
     !isTimestamp(value.updatedAt) ||
     !(value.closedAt === null || isTimestamp(value.closedAt)) ||
-    (value.assignedToMe && !value.assigned)
+    (value.assignedToMe && !value.assigned) ||
+    (value.lastMessageAt !== undefined && !isTimestamp(value.lastMessageAt)) ||
+    (value.closeReason != null &&
+      (!['MANUAL', 'BUYER', 'STAFF', 'INACTIVITY'].includes(String(value.closeReason)) ||
+        value.status !== 'CLOSED')) ||
+    (value.feedback != null &&
+      (value.status !== 'CLOSED' ||
+        !isRecord(value.feedback) ||
+        !Number.isInteger(value.feedback.rating) ||
+        Number(value.feedback.rating) < 1 ||
+        Number(value.feedback.rating) > 5 ||
+        typeof value.feedback.comment !== 'string' ||
+        value.feedback.comment.length > 500 ||
+        !isTimestamp(value.feedback.createdAt)))
   )
     throw new ApiError('人工服务信息不完整，请刷新后重试。', 0, 'INVALID_RESPONSE')
   return value as unknown as SupportSession
@@ -1285,6 +1298,32 @@ export class ApiClient {
       ),
       sessionId,
     )
+  }
+
+  async rateSupport(
+    shopId: string,
+    conversationId: string,
+    sessionId: string,
+    rating: number,
+    comment: string,
+    signal?: AbortSignal,
+  ): Promise<SupportSession> {
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5 || comment.trim().length > 500)
+      throw new ApiError('请选择1至5星，并填写不超过500字的评价。')
+    const response = parseSupportSession(
+      await this.supportWrite(
+        `${this.supportPath(shopId, conversationId)}/${this.validConversationId(sessionId)}/feedback`,
+        { rating, comment: comment.trim() },
+        signal,
+      ),
+    )
+    if (
+      response.id !== sessionId ||
+      response.feedback?.rating !== rating ||
+      response.feedback.comment !== comment.trim()
+    )
+      throw new ApiError('评价结果暂无法确认，请刷新记录核实。', 0, 'INVALID_RESPONSE')
+    return response
   }
 
   async supportSessions(
