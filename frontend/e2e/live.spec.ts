@@ -722,6 +722,26 @@ test('real knowledge audit evidence and recorded logistics stay separate from sa
   expect(otherShopLogistics.reply).not.toContain('学习版配送中心：运输中')
 })
 
+test('an unpaid order explains that no refund is needed without opening a refund form', async ({
+  page,
+}) => {
+  await connect(page, 'frontend-other', password)
+  await selectOrder(page, 'SFUNPAIDLIVE01')
+  const writes: string[] = []
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      /\/orders\/[^/]+\/after-sales$/.test(new URL(request.url()).pathname)
+    )
+      writes.push(request.url())
+  })
+  const response = await chat(page, '我想退款')
+  expect(response.type).toBe('TEXT')
+  expect(response.reply).toContain('尚未支付，无需退款')
+  await expect(page.getByRole('dialog', { name: '申请退款', exact: true })).not.toBeVisible()
+  expect(writes).toEqual([])
+})
+
 test('refund form previews a trusted deadline, requires a reason and creates only on confirmation', async ({
   page,
 }) => {

@@ -104,22 +104,41 @@ test('live typed handoff prompt, chat-only staff claim/reply, close and AI resto
   await expect(page.getByTestId('chat-message').last()).toContainText(reply)
   await expect(page.getByTestId('chat-message').last()).toContainText('店铺客服')
   await staff.getByTestId('support-close').click()
-  await expect(page.getByTestId('buyer-support-status')).toContainText('人工服务已结束')
+  await expect(page.getByTestId('request-human-support')).toBeEnabled()
   const feedback = page.getByRole('dialog', { name: '客服评价', exact: true })
   await expect(feedback).toBeVisible()
   await feedback.getByRole('radio', { name: '5星', exact: true }).check()
   await feedback.getByTestId('support-feedback-comment').fill('客服解释清楚，处理及时')
+  const savedFeedback = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      /\/support\/[^/]+\/feedback$/.test(new URL(response.url()).pathname),
+  )
   await feedback.getByTestId('submit-support-feedback').click()
   await expect(feedback).not.toBeVisible()
-  await expect(page.getByTestId('buyer-support-status')).toContainText('已评价：5星')
+  expect((await (await savedFeedback).json()).feedback).toMatchObject({
+    rating: 5,
+    comment: '客服解释清楚，处理及时',
+  })
+  await expect(page.getByTestId('buyer-support-status')).not.toContainText(/已评价|人工服务已结束/)
   await send(page, '我的订单')
   await expect(page.getByTestId('chat-message').last()).toContainText('店铺智能客服')
   await expect(page.getByTestId('chat-message').filter({ hasText: text })).toHaveCount(1)
   await expect(page.getByTestId('chat-message').filter({ hasText: reply })).toHaveCount(1)
   expect(aiPosts).toBe(2)
+  const restoredSupport = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'GET' &&
+      /\/support$/.test(new URL(response.url()).pathname) &&
+      response.status() === 200,
+  )
   await page.reload()
   await connect(page, 'frontend-buyer', password)
-  await expect(page.getByTestId('buyer-support-status')).toContainText('已评价：5星')
+  expect((await (await restoredSupport).json()).session.feedback).toMatchObject({
+    rating: 5,
+    comment: '客服解释清楚，处理及时',
+  })
+  await expect(page.getByTestId('buyer-support-status')).not.toContainText(/已评价|人工服务已结束/)
   await expect(page.getByRole('dialog', { name: '客服评价', exact: true })).not.toBeVisible()
   await expect(page.getByTestId('chat-message').filter({ hasText: text })).toHaveCount(1)
   await expect(page.getByTestId('chat-message').filter({ hasText: reply })).toHaveCount(1)

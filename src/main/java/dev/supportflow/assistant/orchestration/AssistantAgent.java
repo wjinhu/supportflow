@@ -12,6 +12,7 @@ import dev.supportflow.chat.application.ChatService;
 import dev.supportflow.chat.application.ModelUnavailableException;
 import dev.supportflow.chat.application.model.ChatReply;
 import dev.supportflow.common.security.model.CustomerPrincipal;
+import dev.supportflow.order.domain.model.SupportOrder;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -77,7 +78,7 @@ public class AssistantAgent {
         if (route == AssistantRoute.LOGISTICS) return ChatReply.text(logistics.lookup(order));
         String reason = message.strip().substring("申请售后".length()).strip();
         if (reason.startsWith(orderNo)) reason = reason.substring(orderNo.length()).strip();
-        if (reason.isBlank()) return ChatReply.refundForm("请补充退款原因，提交后会核对售后期限，并交由客服审核。"
+        if (reason.isBlank()) return refundFormForOwnedOrder("请补充退款原因，提交后会核对售后期限，并交由客服审核。"
                 + "当前为演示环境，不会实际返款。", order);
         return ChatReply.text(afterSale.request(principal, shopId, orderNo, reason));
     }
@@ -100,7 +101,15 @@ public class AssistantAgent {
         // The form receives only an owned order, never identifiers invented by a model.
         new dev.supportflow.assistant.planning.PlannedToolCall(ToolName.ORDER_LOOKUP, orderNo);
         var order = orderTool.lookup(principal.getIdentity(), shopId, orderNo);
-        return ChatReply.refundForm("请填写订单 " + order.orderNo() + " 的退款原因。" + note, order);
+        return refundFormForOwnedOrder("请填写订单 " + order.orderNo() + " 的退款原因。" + note, order);
+    }
+
+    private ChatReply refundFormForOwnedOrder(String prompt, SupportOrder order) {
+        return switch (order.status()) {
+            case CREATED -> ChatReply.text("订单 " + order.orderNo() + " 尚未支付，无需退款。请核对需要申请退款的已付款订单。");
+            case CANCELLED -> ChatReply.text("订单 " + order.orderNo() + " 已取消，不能申请退款。");
+            default -> ChatReply.refundForm(prompt, order);
+        };
     }
 
     private void requireOrderRead(CustomerPrincipal principal) {

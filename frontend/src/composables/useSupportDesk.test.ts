@@ -1779,6 +1779,22 @@ describe('useSupportDesk', () => {
     expect(mocks.applyAfterSale).not.toHaveBeenCalled()
   })
 
+  it.each(['CREATED', 'CANCELLED'] as const)(
+    'does not open a refund dialog for a %s order from an older server or a direct action',
+    async (status) => {
+      const desk = createDesk()
+      await desk.connect('buyer', 'test')
+      const unpaid = { ...order, status }
+      mocks.reply.mockResolvedValueOnce({ ...textReply, type: 'AFTER_SALE_FORM', orders: [unpaid] })
+      await desk.sendMessage('我想退款')
+      expect(desk.refundOpen.value).toBe(false)
+      await desk.openRefundForm(unpaid)
+      expect(desk.refundOpen.value).toBe(false)
+      expect(mocks.afterSaleEligibility).not.toHaveBeenCalled()
+      expect(mocks.applyAfterSale).not.toHaveBeenCalled()
+    },
+  )
+
   it('requires a new order choice when the server reports an ambiguous refund target', async () => {
     const desk = createDesk()
     await desk.connect('buyer', 'test')

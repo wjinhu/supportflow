@@ -10,7 +10,7 @@ const nativeRoot = "target/rag-native/ai/onnxruntime/native/linux-x64";
 const nativeNames = ["libonnxruntime.so", "libonnxruntime4j_jni.so"];
 const maxImageBytes = 2 * 1024 ** 3;
 const maxPayloadBytes = 3 * 1024 ** 3;
-const repositoryUrl = "https://github.com/wjinhu98-tech/supportflow";
+const repositoryUrl = "https://github.com/wjinhu/supportflow";
 const deliveredDocs = ["docs/delivery-install.md", "docs/demo-guide.md", "docs/project-overview.md", "docs/interview-guide.md"];
 const fixedFiles = [
   "deploy/nginx.conf", "deploy/prometheus.yml", "deploy/prometheus-rules.yml", "deploy/sql/init-lab.sh",

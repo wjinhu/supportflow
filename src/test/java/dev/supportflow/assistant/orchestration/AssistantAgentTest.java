@@ -105,6 +105,26 @@ class AssistantAgentTest {
     }
 
     @Test
+    void shouldNotOfferRefundFormForFreshUnpaidOrCancelledOrder() {
+        for (OrderStatus status : List.of(OrderStatus.CREATED, OrderStatus.CANCELLED)) {
+            var unavailable = new SupportOrder(1, 100, 200, 200, "SF10001", status,
+                    new BigDecimal("100.00"), "CNY", Instant.EPOCH, Instant.EPOCH);
+            when(orders.lookup(identity, 100, "SF10001")).thenReturn(unavailable);
+            for (String message : List.of("我想退款", "申请退款 SF10001")) {
+                var reply = agent.execute(AssistantRoute.AFTER_SALE_GUIDANCE, principal, 100, message, "SF10001");
+                assertThat(reply.type()).isEqualTo(ChatReplyType.TEXT);
+                assertThat(reply.orders()).isEmpty();
+                assertThat(reply.reply()).contains(status == OrderStatus.CREATED ? "尚未支付，无需退款" : "已取消");
+            }
+            when(planner.plan(ToolName.AFTER_SALE_REQUEST, "申请售后 SF10001", "SF10001"))
+                    .thenReturn(new PlannedToolCall(ToolName.AFTER_SALE_REQUEST, "SF10001"));
+            assertThat(agent.execute(AssistantRoute.AFTER_SALE, principal, 100, "申请售后 SF10001", "SF10001").type())
+                    .isEqualTo(ChatReplyType.TEXT);
+        }
+        verifyNoInteractions(afterSale, logistics, legacy);
+    }
+
+    @Test
     void shouldUseExplicitOrderInsteadOfStaleSelectedOrderAndCheckItsOwnership() {
         when(orders.lookup(identity, 100, "SF10001")).thenReturn(order);
         ChatReply reply = agent.execute(AssistantRoute.AFTER_SALE_GUIDANCE, principal, 100,

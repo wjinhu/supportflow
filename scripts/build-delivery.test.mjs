@@ -123,7 +123,7 @@ test("delivery contains offline guides and a useful entry README; online evidenc
   assert.match(readme, /0\.1\.0-SNAPSHOT/);
   assert.ok(readme.includes(sha));
   assert.match(readme, /local-preview.*未提交/s);
-  assert.ok(readme.includes(`https://github.com/wjinhu98-tech/supportflow/blob/${sha}/README.md`));
+  assert.ok(readme.includes(`https://github.com/wjinhu/supportflow/blob/${sha}/README.md`));
   assert.match(readme, /supportflow\.ps1 Verify\n.*supportflow\.ps1 BuildImages\n.*supportflow\.ps1 Prepare\n.*supportflow\.ps1 Start\n.*supportflow\.ps1 VerifyRuntime/);
   assert.match(readme, /不声明检查通过/);
   for (const name of ["delivery-install", "demo-guide", "project-overview", "interview-guide"]) {
@@ -132,8 +132,8 @@ test("delivery contains offline guides and a useful entry README; online evidenc
   }
   const demo = entries.get("docs/demo-guide.md").toString("utf8");
   assert.ok(demo.includes("](project-overview.md#roles)"));
-  assert.ok(demo.includes(`](https://github.com/wjinhu98-tech/supportflow/blob/${sha}/frontend/README.md#development)`));
-  assert.ok(demo.includes(`](https://github.com/wjinhu98-tech/supportflow/blob/${sha}/src/main/java/dev/supportflow/order/application/OrderQueryService.java)`));
+  assert.ok(demo.includes(`](https://github.com/wjinhu/supportflow/blob/${sha}/frontend/README.md#development)`));
+  assert.ok(demo.includes(`](https://github.com/wjinhu/supportflow/blob/${sha}/src/main/java/dev/supportflow/order/application/OrderQueryService.java)`));
   assert.ok(demo.includes("](https://example.org/guide?mode=offline#start)"));
   assert.ok(demo.includes("](#demo)"));
   assert.equal(await readFile(path.join(root, "docs", "demo-guide.md"), "utf8"), original);
@@ -151,7 +151,7 @@ test("documentation links reject root escapes, private and unknown files; approv
     await assert.rejects(rewrite(`[invalid](${target})`), /escapes|Unreviewed|Unsafe/);
   }
   await assert.rejects(rewrite("[missing](../deploy/README.md)"), /ENOENT/);
-  assert.equal(await rewrite("[repository](../README.md#start)"), `[repository](https://github.com/wjinhu98-tech/supportflow/blob/${sha}/README.md#start)`);
+  assert.equal(await rewrite("[repository](../README.md#start)"), `[repository](https://github.com/wjinhu/supportflow/blob/${sha}/README.md#start)`);
   const external = "[url](https://example.org/a?x=1#part) [email](mailto:demo@example.org) [anchor](#part)";
   assert.equal(await rewrite(external), external);
 });
@@ -175,7 +175,7 @@ test("Spring AI source guides become revision-pinned online links and never expa
     await put(root, `docs/${name}.md`, "SOURCE_ONLY_AI_GUIDE");
     const rewritten = await rewriteDocumentLinks({ root, relative: "docs/interview-guide.md",
       markdown: `[guide](${name}.md#details)`, sha, bundledFiles: new Set(["docs/interview-guide.md"]) });
-    assert.equal(rewritten, `[guide](https://github.com/wjinhu98-tech/supportflow/blob/${sha}/docs/${name}.md#details)`);
+    assert.equal(rewritten, `[guide](https://github.com/wjinhu/supportflow/blob/${sha}/docs/${name}.md#details)`);
   }
   const result = await buildDelivery({ root, sha, builtAt });
   const archive = await readFile(result.archive);

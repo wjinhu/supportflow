@@ -497,6 +497,24 @@ class AssistantWorkflowIT extends SpringContainerTest {
                 .andExpect(jsonPath("$.orders").isEmpty());
     }
 
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = {"CREATED", "CANCELLED"})
+    void shouldReturnTextInsteadOfRefundFormForAnUnpaidOrCancelledOrder(OrderStatus state) throws Exception {
+        Fixture order = order(100L, 200L, state);
+        for (String message : List.of("我想退款", "申请退款")) {
+            JsonNode response = body(mvc.perform(post("/api/v1/shops/100/chat/messages")
+                            .with(httpBasic("buyer", PASSWORD)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                            .content(json.writeValueAsString(Map.of("message", message, "orderNo", order.number()))))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.type").value("TEXT"))
+                    .andExpect(jsonPath("$.orders").isEmpty()).andReturn());
+            assertThat(response.get("reply").asString())
+                    .contains(state == OrderStatus.CREATED ? "尚未支付，无需退款" : "已取消");
+        }
+        chat("buyer", 100L, "申请退款 " + order.number()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("TEXT"));
+        assertThat(countCases(order)).isZero();
+    }
+
     @Test
     void shouldReportTrustedReceiptAndFifteenDayDeadlineWithoutWriting() throws Exception {
         Fixture order = order(100L, 200L, OrderStatus.COMPLETED);

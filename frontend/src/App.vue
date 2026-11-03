@@ -894,13 +894,6 @@ watch(
               </button>
             </template>
             <template v-else>
-              <span v-if="humanSession?.status === 'CLOSED'">
-                {{
-                  humanSession.closeReason === 'INACTIVITY'
-                    ? '人工服务已结束：连续5分钟没有新消息，已自动结束服务。'
-                    : '人工服务已结束，可继续咨询智能客服。'
-                }}
-              </span>
               <button
                 v-if="humanSession?.status === 'CLOSED' && !humanSession.feedback"
                 type="button"
@@ -908,9 +901,6 @@ watch(
               >
                 评价本次服务
               </button>
-              <span v-if="humanSession?.feedback">
-                已评价：{{ humanSession.feedback.rating }}星
-              </span>
               <button
                 type="button"
                 data-testid="request-human-support"

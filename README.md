@@ -4,7 +4,7 @@ Java 21 / Spring Boot 4 + Vue 店铺客服学习项目，包含可切换 Spring 
 
 `supportflow.ai.planner=custom` 当前仍为默认值。Spring AI 模式需显式开启；只有受限模型决策与公开资料筛选经过该适配，具体业务事实由原 Java 运行时校验和执行。
 
-[![SupportFlow CI and delivery](https://github.com/wjinhu98-tech/supportflow/actions/workflows/agent-evaluation.yml/badge.svg?branch=main)](https://github.com/wjinhu98-tech/supportflow/actions/workflows/agent-evaluation.yml?query=branch%3Amain)
+[![SupportFlow CI and delivery](https://github.com/wjinhu/supportflow/actions/workflows/agent-evaluation.yml/badge.svg?branch=main)](https://github.com/wjinhu/supportflow/actions/workflows/agent-evaluation.yml?query=branch%3Amain)
 
 本版进入 Feature Freeze 验收：保持现有功能和 AI 主架构，后续优先学习、演示和面试复述。冻结依据是最终提交对应的全部必需 CI 作业成功；已核验基线、修复历史和剩余局限见[能力审计](docs/ai-job-gap-audit.md)。
 

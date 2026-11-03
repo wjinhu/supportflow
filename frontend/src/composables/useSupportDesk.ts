@@ -1249,6 +1249,7 @@ export function useSupportDesk() {
       return
     if (order && isOrderDeleted(order)) return
     closeRefundForm()
+    if (order && (order.status === 'CREATED' || order.status === 'CANCELLED')) return
     refundOpen.value = true
     if (order?.shopId === Number(shopId.value)) await chooseRefundOrder(order)
     else if (!orders.value.length && !ordersBusy.value) await loadOrders()
