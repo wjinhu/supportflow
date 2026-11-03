@@ -1,6 +1,7 @@
 package dev.supportflow.chat.support;
 
 import dev.supportflow.SupportFlowApplication;
+import dev.supportflow.testsupport.SpringContainerTest;
 import dev.supportflow.chat.api.response.ChatResponse;
 import dev.supportflow.chat.application.model.ChatReplyType;
 import dev.supportflow.chat.conversation.*;
@@ -51,7 +52,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         properties = {"spring.config.location=classpath:/application-day4-test.yml", "spring.main.banner-mode=off", "supportflow.ai.deepseek.enabled=false"})
 @ActiveProfiles("local")
 @Testcontainers
-class HumanSupportApiIT {
+class HumanSupportApiIT extends SpringContainerTest {
     private static final String PASSWORD = UUID.randomUUID().toString();
     private static final String HASH = PasswordEncoderFactories.createDelegatingPasswordEncoder().encode(PASSWORD);
     private static final AtomicLong SHOPS = new AtomicLong(80000);

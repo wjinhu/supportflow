@@ -1,6 +1,7 @@
 package dev.supportflow.common.security.session;
 
 import dev.supportflow.SupportFlowApplication;
+import dev.supportflow.testsupport.SpringContainerTest;
 import dev.supportflow.common.security.database.DatabaseAccountAdministration;
 import dev.supportflow.common.security.local.LocalCustomerAccount;
 import dev.supportflow.common.security.model.AccountType;
@@ -53,7 +54,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "supportflow.security.authentication.session-timeout=10m"})
 @ActiveProfiles("local")
 @Testcontainers
-class BrowserSessionIT {
+class BrowserSessionIT extends SpringContainerTest {
     private static final String PASSWORD = UUID.randomUUID().toString();
     private static final String PASSWORD_HASH = PasswordEncoderFactories.createDelegatingPasswordEncoder().encode(PASSWORD);
     private static final String READER_PASSWORD = UUID.randomUUID().toString();

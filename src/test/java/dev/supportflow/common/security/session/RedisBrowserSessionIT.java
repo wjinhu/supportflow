@@ -1,6 +1,7 @@
 package dev.supportflow.common.security.session;
 
 import dev.supportflow.SupportFlowApplication;
+import dev.supportflow.testsupport.ApplicationResourceAssertions;
 import dev.supportflow.common.security.database.DatabaseAccountAdministration;
 import dev.supportflow.common.security.local.LocalCustomerAccount;
 import dev.supportflow.common.security.model.AccountType;
@@ -104,14 +105,28 @@ class RedisBrowserSessionIT {
             first = application("JSESSIONID");
             second = application("JSESSIONID");
         } catch (RuntimeException failure) {
-            closeContexts();
+            closeApplications();
             throw failure;
         }
     }
 
     @AfterAll static void closeContexts() {
-        if (second != null) { second.close(); second = null; }
-        if (first != null) { first.close(); first = null; }
+        try { closeApplications(); }
+        finally {
+            HTTP.close();
+            assertThat(HTTP.isTerminated()).as("test-owned HTTP client terminated").isTrue();
+        }
+    }
+
+    private static void closeApplications() {
+        try {
+            if (second != null) ApplicationResourceAssertions.closeAndVerify(second);
+        } finally {
+            second = null;
+            try {
+                if (first != null) ApplicationResourceAssertions.closeAndVerify(first);
+            } finally { first = null; }
+        }
     }
 
     @Test @Order(1)

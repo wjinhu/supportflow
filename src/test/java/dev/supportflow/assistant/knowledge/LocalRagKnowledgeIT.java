@@ -1,6 +1,7 @@
 package dev.supportflow.assistant.knowledge;
 
 import dev.supportflow.SupportFlowApplication;
+import dev.supportflow.testsupport.SpringContainerTest;
 import dev.supportflow.testsupport.KnowledgeFixtures;
 import dev.supportflow.testsupport.OrderVisibilityFixtures;
 import dev.supportflow.testsupport.HumanSupportFixtures;
@@ -57,7 +58,7 @@ import static org.mockito.ArgumentMatchers.*;
 @Testcontainers
 @ActiveProfiles("local")
 @Execution(ExecutionMode.SAME_THREAD)
-class LocalRagKnowledgeIT {
+class LocalRagKnowledgeIT extends SpringContainerTest {
     private static final String PASSWORD = UUID.randomUUID().toString();
     private static final String HASH = PasswordEncoderFactories.createDelegatingPasswordEncoder().encode(PASSWORD);
     private static final String DB_PASSWORD = UUID.randomUUID().toString();

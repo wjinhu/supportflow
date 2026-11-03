@@ -1,6 +1,7 @@
 package dev.supportflow.chat.api;
 
 import dev.supportflow.SupportFlowApplication;
+import dev.supportflow.testsupport.SpringContainerTest;
 import dev.supportflow.assistant.knowledge.KnowledgeService;
 import dev.supportflow.assistant.orchestration.ConversationOrchestrator;
 import dev.supportflow.chat.application.ModelUnavailableException;
@@ -85,7 +86,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("local")
 @Testcontainers
 @Execution(ExecutionMode.SAME_THREAD)
-class ConversationApiIT {
+class ConversationApiIT extends SpringContainerTest {
     private static final String STREAM_ACCEPT = "text/event-stream, application/json;q=0.9";
     private static final String DATABASE = "supportflow_conversation_test";
     private static final String PASSWORD = UUID.randomUUID().toString();

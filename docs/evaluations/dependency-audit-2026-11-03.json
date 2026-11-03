@@ -1,0 +1,334 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-11-03",
+  "sourceBaseCommit": "94e8ff02594a44365037289468a6480cd013611c",
+  "node": "22.22.2",
+  "npm": "10.9.7",
+  "dependencyChanges": [],
+  "audit": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {
+      "@vue/test-utils": {
+        "name": "@vue/test-utils",
+        "severity": "moderate",
+        "isDirect": true,
+        "via": [
+          "js-beautify"
+        ],
+        "effects": [],
+        "range": ">=2.5.0",
+        "nodes": [
+          "node_modules/@vue/test-utils"
+        ],
+        "fixAvailable": {
+          "name": "@vue/test-utils",
+          "version": "2.4.11",
+          "isSemVerMajor": true
+        }
+      },
+      "editorconfig": {
+        "name": "editorconfig",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "minimatch"
+        ],
+        "effects": [
+          "js-beautify"
+        ],
+        "range": ">=1.0.0",
+        "nodes": [
+          "node_modules/editorconfig"
+        ],
+        "fixAvailable": {
+          "name": "@vue/test-utils",
+          "version": "2.4.11",
+          "isSemVerMajor": true
+        }
+      },
+      "glob": {
+        "name": "glob",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1244013,
+            "name": "glob",
+            "dependency": "glob",
+            "title": "Glob: AbortSignal cancellation bypass allows post-timeout filesystem traversal",
+            "url": "https://github.com/advisories/GHSA-3g3m-2fjr-6pw4",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-400"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=9.0.0 <=14.0.1"
+          },
+          "minimatch"
+        ],
+        "effects": [
+          "js-beautify"
+        ],
+        "range": "3.0.0 - 14.0.1",
+        "nodes": [
+          "node_modules/glob"
+        ],
+        "fixAvailable": {
+          "name": "@vue/test-utils",
+          "version": "2.4.11",
+          "isSemVerMajor": true
+        }
+      },
+      "js-beautify": {
+        "name": "js-beautify",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "editorconfig",
+          "glob"
+        ],
+        "effects": [
+          "@vue/test-utils"
+        ],
+        "range": ">=1.14.9",
+        "nodes": [
+          "node_modules/js-beautify"
+        ],
+        "fixAvailable": {
+          "name": "@vue/test-utils",
+          "version": "2.4.11",
+          "isSemVerMajor": true
+        }
+      },
+      "minimatch": {
+        "name": "minimatch",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1244012,
+            "name": "minimatch",
+            "dependency": "minimatch",
+            "title": "minimatch has potential denial of service via globparts amplification",
+            "url": "https://github.com/advisories/GHSA-g3hv-75wg-m249",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-405"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": "<11.0.1"
+          }
+        ],
+        "effects": [
+          "editorconfig",
+          "glob"
+        ],
+        "range": "<11.0.1",
+        "nodes": [
+          "node_modules/minimatch"
+        ],
+        "fixAvailable": {
+          "name": "@vue/test-utils",
+          "version": "2.4.11",
+          "isSemVerMajor": true
+        }
+      }
+    },
+    "metadata": {
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 5,
+        "high": 0,
+        "critical": 0,
+        "total": 5
+      },
+      "dependencies": {
+        "prod": 26,
+        "dev": 125,
+        "optional": 27,
+        "peer": 0,
+        "peerOptional": 0,
+        "total": 150
+      }
+    }
+  },
+  "productionAudit": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {},
+    "metadata": {
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      },
+      "dependencies": {
+        "prod": 26,
+        "dev": 125,
+        "optional": 27,
+        "peer": 0,
+        "peerOptional": 0,
+        "total": 150
+      }
+    }
+  },
+  "dependencyTree": {
+    "version": "0.1.0",
+    "name": "supportflow-frontend",
+    "dependencies": {
+      "@vue/test-utils": {
+        "version": "2.5.1",
+        "resolved": "https://registry.npmjs.org/@vue/test-utils/-/test-utils-2.5.1.tgz",
+        "overridden": false,
+        "dependencies": {
+          "js-beautify": {
+            "version": "2.0.3",
+            "resolved": "https://registry.npmjs.org/js-beautify/-/js-beautify-2.0.3.tgz",
+            "overridden": false,
+            "dependencies": {
+              "editorconfig": {
+                "version": "3.0.2",
+                "resolved": "https://registry.npmjs.org/editorconfig/-/editorconfig-3.0.2.tgz",
+                "overridden": false,
+                "dependencies": {
+                  "minimatch": {
+                    "version": "10.2.6",
+                    "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-10.2.6.tgz",
+                    "overridden": false
+                  }
+                }
+              },
+              "glob": {
+                "version": "13.0.6",
+                "resolved": "https://registry.npmjs.org/glob/-/glob-13.0.6.tgz",
+                "overridden": false,
+                "dependencies": {
+                  "minimatch": {
+                    "version": "10.2.6"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "upstreamManifests": {
+    "@vue/test-utils": {
+      "latest": "2.5.1",
+      "dependencies": {
+        "js-beautify": "^2.0.0",
+        "vue-component-type-helpers": "^3.0.0"
+      },
+      "engines": {}
+    },
+    "js-beautify": {
+      "latest": "2.0.3",
+      "dependencies": {
+        "config-chain": "^1.1.13",
+        "editorconfig": "^3.0.2",
+        "glob": "^13.0.6",
+        "js-cookie": "^3.0.8",
+        "nopt": "^10.0.1"
+      },
+      "engines": {}
+    },
+    "editorconfig": {
+      "latest": "3.0.2",
+      "dependencies": {
+        "@one-ini/wasm": "0.2.1",
+        "commander": "^14.0.3",
+        "minimatch": "~10.2.4",
+        "semver": "^7.7.4"
+      },
+      "engines": {
+        "node": ">=20"
+      }
+    },
+    "glob": {
+      "latest": "14.0.3",
+      "dependencies": {
+        "minipass": "^7.1.3",
+        "minimatch": "^11.0.2",
+        "path-scurry": "^3.0.0"
+      },
+      "engines": {
+        "node": "18 || 20 || >=22"
+      }
+    },
+    "minimatch": {
+      "latest": "11.0.4",
+      "dependencies": {},
+      "engines": {
+        "node": "20 || >=22"
+      }
+    }
+  },
+  "productionBundle": {
+    "schemaVersion": 1,
+    "mode": "production",
+    "moduleCount": 93,
+    "emittedFilesMatchDist": 3,
+    "devToolOrTestModules": [],
+    "credentialOrTestFileMatches": [],
+    "bundledPackages": [
+      "@lucide/vue",
+      "@vue/reactivity",
+      "@vue/runtime-core",
+      "@vue/runtime-dom",
+      "@vue/shared"
+    ],
+    "inventory": [
+      {
+        "file": "assets/index-BYdamfcd.js",
+        "bytes": 247158,
+        "sha256": "bc37a39f3e1b7f6f40422e45f0c90bf981dcbc1265e93872fa65919cb7cff971"
+      },
+      {
+        "file": "assets/index-BZYSms9v.css",
+        "bytes": 62816,
+        "sha256": "b1bef42ff53e462dc25a2abbb7d4ce9d730136634f37bbce484f86162a975507"
+      },
+      {
+        "file": "favicon.svg",
+        "bytes": 306,
+        "sha256": "a68521f22ad9da0d392d10a74d5d7f33f21efbc8b68d4b29dd2671f42a359743"
+      },
+      {
+        "file": "index.html",
+        "bytes": 732,
+        "sha256": "2233cad99934bbdc45e391f5c5d81da8e73acfa6e7d103385a2339049da35c19"
+      },
+      {
+        "file": "products/demo/black-earbuds.png",
+        "bytes": 1833649,
+        "sha256": "2f46339d5cef0630cebbc9ab0937f5e092fab237eff29c8d3c3ff180293fdb32"
+      },
+      {
+        "file": "products/demo/cotton-bedding.png",
+        "bytes": 1490759,
+        "sha256": "d75830d3bb154cdc24566f42df712e31e10e0af70ffa4df8a5874137b982eb29"
+      },
+      {
+        "file": "products/demo/white-mouse.png",
+        "bytes": 1643975,
+        "sha256": "a6ee30ff66100598f7e90a71ab75eb71ae745a2dea2f2a7fbce0522670ef07e6"
+      },
+      {
+        "file": "products/demo/white-mug.png",
+        "bytes": 1349757,
+        "sha256": "0cc8abec7bdf9e336888596420ddff11bbb4410cf118cc5144c2f7d95666b211"
+      }
+    ]
+  }
+}

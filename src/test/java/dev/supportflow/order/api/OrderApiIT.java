@@ -5,6 +5,7 @@ import dev.supportflow.testsupport.OrderVisibilityFixtures;
 import dev.supportflow.testsupport.HumanSupportFixtures;
 
 import dev.supportflow.SupportFlowApplication;
+import dev.supportflow.testsupport.SpringContainerTest;
 import dev.supportflow.chat.application.ModelUnavailableException;
 import dev.supportflow.chat.application.model.OrderIntent;
 import dev.supportflow.chat.application.port.OrderIntentRecognizer;
@@ -81,7 +82,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 )
 @ActiveProfiles("local")
 @Testcontainers
-class OrderApiIT {
+class OrderApiIT extends SpringContainerTest {
 
     private static final String LOGIN_PASSWORD = UUID.randomUUID().toString();
     private static final String PASSWORD_HASH = PasswordEncoderFactories

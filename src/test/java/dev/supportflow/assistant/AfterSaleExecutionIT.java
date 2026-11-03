@@ -1,6 +1,7 @@
 package dev.supportflow.assistant;
 
 import dev.supportflow.SupportFlowApplication;
+import dev.supportflow.testsupport.SpringContainerTest;
 import dev.supportflow.assistant.execution.AfterSaleExecutionProcessor;
 import dev.supportflow.assistant.execution.AfterSaleExecutionWorker;
 import dev.supportflow.assistant.execution.ExecutionClaim;
@@ -73,7 +74,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("local")
 @Testcontainers
 @Execution(ExecutionMode.SAME_THREAD)
-class AfterSaleExecutionIT {
+class AfterSaleExecutionIT extends SpringContainerTest {
     private static final String PASSWORD = UUID.randomUUID().toString();
     private static final String HASH = PasswordEncoderFactories.createDelegatingPasswordEncoder().encode(PASSWORD);
     private static final String DATABASE_PASSWORD = UUID.randomUUID().toString();

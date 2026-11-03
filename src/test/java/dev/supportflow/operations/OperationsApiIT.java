@@ -1,6 +1,7 @@
 package dev.supportflow.operations;
 
 import dev.supportflow.SupportFlowApplication;
+import dev.supportflow.testsupport.SpringContainerTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,7 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "supportflow.operations.username=ops-test"})
 @ActiveProfiles("local")
 @Testcontainers
-class OperationsApiIT {
+class OperationsApiIT extends SpringContainerTest {
     private static final String PASSWORD = UUID.randomUUID().toString();
     private static final String HASH = PasswordEncoderFactories.createDelegatingPasswordEncoder().encode(PASSWORD);
 

@@ -105,13 +105,15 @@ mvn -B -ntp "-Dspring.test.context.cache.maxSize=4" `
 
 Windows 开发后端原先持有输出 JAR，导致正常 repackage 无法替换文件。本轮仅暂停已核实的该开发进程，保留可执行 JAR 备份，完整构建结束后恢复开发后端；没有通过跳过打包掩盖锁文件问题。npm ci 同样在暂停持有 rolldown 文件的前端开发进程后执行，并已恢复 Vite。
 
-本地容器测试中可见已关闭数据库连接的 Hikari 清理告警。它们不能当作测试失败或直接归因于 Spring AI，但仍属于测试资源生命周期的改进项；以 Maven 最终结果及远端 job 状态判断验收，保留原日志供定位。
+2026-11-02 的本地验证可见已关闭数据库连接的 Hikari 告警。2026-11-03 已将其定位为类级 Testcontainers 与缓存 Spring Context 的生命周期错配，而非直接归因于 Spring AI。修复与复跑证据见[测试资源生命周期收尾](test-resource-lifecycle.md)；这条历史记录不代表当前仍接受原告警。
 
 ### npm audit 分类
 
 本轮锁定依赖的审计为 5 项 moderate，均在开发依赖链 `@vue/test-utils → js-beautify → editorconfig/glob/minimatch`；`npm audit --omit=dev` 为 0。完整结果在本地忽略目录 `target/finalization-npm-audit.json`，生产依赖结果在 `target/finalization-npm-audit-production.json`。
 
 当前 npm 建议的 fix 会把 `@vue/test-utils` 从 2.5.1 切到 2.4.11，标记为可能破坏兼容的变更，不是已验证的无破坏补丁。本轮只分类，不执行 `npm audit fix --force`。生产 bundle 不依赖这条测试工具链，但本地/CI 开发环境的依赖告警仍未消除，后续应在兼容版本发布或单独升级验收时处理。
+
+2026-11-03 补充审计确认：5 项包告警来自 2 条上游公告；glob 修复 14.0.2+、minimatch 修复 11.0.1+，均超出当前父依赖范围，未发现可直接采用的兼容补丁。未升级、降级或覆盖子依赖，生产依赖审计仍为 0；实际生产模块图和文件核查也未发现测试工具链。逐项版本、来源、保留条件及成品 SHA-256 见[依赖风险记录](dependency-risk.md)及其归档 JSON。
 
 ## 学习与面试前保留的边界
 

@@ -1,6 +1,7 @@
 package dev.supportflow.chat.api;
 
 import dev.supportflow.SupportFlowApplication;
+import dev.supportflow.testsupport.SpringContainerTest;
 import dev.supportflow.assistant.tool.LogisticsTool;
 import dev.supportflow.testsupport.KnowledgeFixtures;
 import dev.supportflow.testsupport.OrderVisibilityFixtures;
@@ -62,7 +63,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("local")
 @Testcontainers
 @Execution(ExecutionMode.SAME_THREAD)
-class ProductOrderChatIT {
+class ProductOrderChatIT extends SpringContainerTest {
     private static final String DATABASE = "supportflow_product_chat_test";
     private static final String RUNTIME = "product_chat_runtime";
     private static final String PASSWORD = UUID.randomUUID().toString();

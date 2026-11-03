@@ -1,6 +1,7 @@
 package dev.supportflow.assistant;
 
 import dev.supportflow.SupportFlowApplication;
+import dev.supportflow.testsupport.SpringContainerTest;
 import dev.supportflow.order.domain.model.OrderStatus;
 import dev.supportflow.testsupport.MerchantFixtures;
 import dev.supportflow.testsupport.KnowledgeFixtures;
@@ -69,7 +70,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("local")
 @Testcontainers
 @Execution(ExecutionMode.SAME_THREAD)
-class AssistantWorkflowIT {
+class AssistantWorkflowIT extends SpringContainerTest {
 
     private static final String PASSWORD = UUID.randomUUID().toString();
     private static final String HASH = PasswordEncoderFactories.createDelegatingPasswordEncoder().encode(PASSWORD);

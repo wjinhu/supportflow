@@ -1,6 +1,7 @@
 package dev.supportflow.assistant.evaluation;
 
 import dev.supportflow.SupportFlowApplication;
+import dev.supportflow.testsupport.SpringContainerTest;
 import dev.supportflow.assistant.runtime.model.AgentAction;
 import dev.supportflow.assistant.runtime.model.AgentDecision;
 import dev.supportflow.assistant.runtime.model.AgentModelProfile;
@@ -78,7 +79,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 @ActiveProfiles("local")
 @Testcontainers
 @Execution(ExecutionMode.SAME_THREAD)
-class AgentScenarioEvaluationIT {
+class AgentScenarioEvaluationIT extends SpringContainerTest {
     private static final String DATABASE = "supportflow_agent_evaluation";
     private static final String RUNTIME = "evaluation_runtime";
     private static final String PASSWORD = UUID.randomUUID().toString();

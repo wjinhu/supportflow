@@ -1,6 +1,7 @@
 package dev.supportflow.chat.api;
 
 import dev.supportflow.SupportFlowApplication;
+import dev.supportflow.testsupport.SpringContainerTest;
 import dev.supportflow.assistant.runtime.planning.AgentDecisionPlanner;
 import dev.supportflow.assistant.tool.LogisticsTool;
 import dev.supportflow.chat.api.response.ChatResponse;
@@ -78,7 +79,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("local")
 @Testcontainers
 @Execution(ExecutionMode.SAME_THREAD)
-class AgentRuntimeApiIT {
+class AgentRuntimeApiIT extends SpringContainerTest {
     private static final String DATABASE = "supportflow_agent_api_test";
     private static final String RUNTIME = "agent_api_runtime";
     private static final String PASSWORD = UUID.randomUUID().toString();
