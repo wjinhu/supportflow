@@ -54,7 +54,7 @@ export function useSupportChannel(options: {
   function merge(items: SupportMessage[]) {
     messages.value = [
       ...new Map([...messages.value, ...items].map((item) => [item.id, item])).values(),
-    ].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+    ].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id))
     if (
       uncertainMessage.value &&
       messages.value.some((item) => item.clientMessageId === uncertainMessage.value!.id)

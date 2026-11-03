@@ -61,6 +61,19 @@ afterEach(() => {
 })
 
 describe('scoped human transcript', () => {
+  it('orders whole-second and fractional-second messages by their actual instants', async () => {
+    const { channel } = setup()
+    await vi.waitFor(() => expect(channel.ready.value).toBe(true))
+    const question = { ...message(), createdAt: '2026-11-03T11:27:38Z' }
+    const answer = {
+      ...message(),
+      role: 'STAFF' as const,
+      createdAt: '2026-11-03T11:27:38.002Z',
+    }
+    channel.accept(snapshot(waiting, [answer, question]))
+    expect(channel.messages.value.map((item) => item.id)).toEqual([question.id, answer.id])
+  })
+
   it('fences a delayed read before close or a confirmed claim so old status cannot return', async () => {
     const { channel, read } = setup()
     await vi.waitFor(() => expect(channel.ready.value).toBe(true))

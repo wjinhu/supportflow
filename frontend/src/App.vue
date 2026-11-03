@@ -164,7 +164,7 @@ const timelineMessages = computed<ChatMessage[]>(() =>
       createdAt: item.createdAt,
       human: true,
     })),
-  ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+  ].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)),
 )
 const compositionActive = ref(false)
 const showAfterSales = ref(false)

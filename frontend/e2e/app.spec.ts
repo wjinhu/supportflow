@@ -1068,6 +1068,27 @@ test('assistant markup is rendered as text, never executable HTML', async ({ pag
   ).toBeUndefined()
 })
 
+test('a whole-second question stays before its fractional-second canonical reply', async ({ page }) => {
+  await page.route('**/api/v1/shops/100/chat/conversations/*/messages', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    const upstream = await route.fetch({
+      headers: { ...route.request().headers(), accept: 'application/json' },
+    })
+    const result = await upstream.json()
+    result.messages[0].createdAt = '2026-11-03T11:27:38Z'
+    result.messages[1].createdAt = '2026-11-03T11:27:38.002Z'
+    await route.fulfill({ response: upstream, json: result })
+  })
+  await connect(page)
+  await send(page, '查订单 SF10001')
+  await expect(page.getByTestId('message-input')).toBeEnabled()
+  const transcript = page.getByTestId('chat-message')
+  await expect(transcript).toHaveCount(2)
+  await expect(transcript.first()).toHaveClass(/message-user/)
+  await expect(transcript.last()).toHaveClass(/message-assistant/)
+  await expect(transcript.last()).toContainText('已发货')
+})
+
 test('mobile shop consultation works without document-level horizontal overflow', async ({
   page,
 }, testInfo) => {
@@ -1076,6 +1097,9 @@ test('mobile shop consultation works without document-level horizontal overflow'
   await showOrders(page)
   await expect(page.getByTestId('orders-panel').getByTestId('order-card')).toHaveCount(20)
   await send(page, '查订单 SF10001')
+  await expect(page.getByTestId('message-input')).toBeEnabled()
+  await expect(page.getByTestId('streaming-reply')).toHaveCount(0)
+  await expect(page.getByTestId('chat-message').last().getByTestId('order-card')).toHaveCount(1)
   await expect(page.getByTestId('chat-message').last()).toContainText('已发货')
   await page.getByTestId('chat-message').last().scrollIntoViewIfNeeded()
   await page.waitForTimeout(350)
