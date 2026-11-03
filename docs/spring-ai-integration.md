@@ -1,6 +1,8 @@
 # Spring AI 与持久化 Agent 的集成
 
-本次集成使用 Java 21、Spring Boot 4.0.8 和 Spring AI 2.0.2，保留原来的业务入口、Agent 执行器、数据库结构和知识检索。默认 `supportflow.ai.planner=custom`。新增实现通过真实的 Spring AI DeepSeekChatModel、ChatClient 和 RestClient 请求链工作，专项测试替换最后一层 HTTP 客户端，不调用付费接口。
+当前集成状态为 **IMPLEMENTED**，使用 Java 21、Spring Boot 4.0.8 和 Spring AI 2.0.2，保留原来的业务入口、Agent 执行器、数据库结构和知识检索。默认 `supportflow.ai.planner=custom`。实现通过真实的 Spring AI DeepSeekChatModel、ChatClient 和 RestClient 请求链工作；常规专项测试替换最后一层 HTTP 客户端，不调用付费接口，另有已归档的真实 DeepSeek 小样本验收。
+
+分工保持为：LLM 处理不确定的理解、受限规划与动作建议；Java 控制身份、授权、业务规则和真实工具执行。本轮仅同步文档与冻结证据，没有更换 AI 主架构。
 
 ## 配置与回退
 
@@ -20,6 +22,8 @@ Spring AI 自动模型和默认 ChatClient 在应用启动入口显式排除，�
 公开资料筛选还沿用 `supportflow.rag.enabled` 和 `supportflow.rag.public-evidence-selection-enabled` 开关。BGE 的模型准备要求见 [语义检索](semantic-rag.md)，本次不会为了展示 ChatClient 而自动开启 BGE 或扩大外发授权。
 
 ## 当前调用链
+
+启用 `spring-ai` 时，核心链路是 `AgentLoopExecutor → SpringAiAgentDecisionPlanner → DeepSeekChatModel → DeepSeek API → Java validateDecision → 只读工具 → MySQL Checkpoint → 下一轮规划`。State / Checkpoint / Budget 均保存在 MySQL。Redis 仅用于可选共享 HTTP Session，不是 Agent State、ChatMemory 或向量库。
 
 ```mermaid
 flowchart TD
@@ -82,7 +86,7 @@ Provider 的 usage 和 tool-call 参数在原执行器的解析边界内严格�
 
 ## RAG 与数据外发
 
-`RagKnowledgeSearch` 的算法、分块、BGE、RRF 融合、相似度阈值、缓存、MySQL 向量、版本与内容哈希均保留。没有引入替代的普通 VectorStore 或 QuestionAnswerAdvisor。
+`RagKnowledgeSearch` 保留关键词／词法检索 + 本地 BGE dense 检索、加权 RRF 类融合、相似度与 margin 阈值、词法回退及 TopK 证据（当前最多 2 篇）。分块、缓存、自有 MySQL 持久向量、版本与内容哈希均保留。它不是独立 Reranker，也没有引入 Spring AI VectorStore 或 QuestionAnswerAdvisor。
 
 `forShop(shopId)` 用 Java 参数绑定店铺，调用当前 `KnowledgeService.searchEvidence`。它每次重新解析当前可见来源，忽略模型控制的 Query 上下文字段。Document 元数据保留 `sourceId`、`shopId`、`version`、`title`、`contentHash`。证据对象没有原始发布状态字段，因此以 `visibility=CURRENT_VISIBLE` 表示已经过原服务当前来源筛选，不虚构草稿或发布状态。
 
@@ -121,13 +125,13 @@ mvn -B -ntp verify
 mvn -B -ntp "-Dspring-boot.repackage.skip=true" verify
 ```
 
-CI 使用 `spring.test.context.cache.maxSize=4` 限制测试上下文缓存。本地长时间全量集成测试建议沿用该设置，减少已停止容器与缓存 Spring 上下文的资源清理交错。此次全量测试退出阶段的 Hikari 清理超时单列在审计记录中。
+CI 和本地完整验收使用 `mvn -B -ntp "-Dspring.test.context.cache.maxSize=4" verify`，包含正常重打包。已有测试资源生命周期修复处理类级容器与缓存 Spring 上下文错配；旧 Hikari 清理告警的根因及复跑记录见[测试资源生命周期](test-resource-lifecycle.md)，不能再把旧告警当作当前现状。
 
-具体测试数量与本次验收结果见 [能力审计](ai-job-gap-audit.md)。这次没有使用真实付费 Key 或上传到 GitHub，也没有用合成响应结果宣称真实 DeepSeek 效果。
+具体测试数量、CI 核验和历史失败修复见[能力审计](ai-job-gap-audit.md)。2026-11-02 的独立真实模型验收已归档到[模型评测](real-model-evaluation.md)：6/6 合成任务、14 次调用、10081 token，Tool Selection Accuracy / Argument Accuracy / Task Success Rate 均为 1.0。本轮核对 JSON，没有重新付费调用。它是小样本合成评测，不代表生产准确率，不构成生产延迟基线；不能与公开知识筛选质量或全站客服效果混用。
 
 官方 API 对照为 [2.0 Tool Calling](https://docs.spring.io/spring-ai/reference/api/tools.html)、[DeepSeek](https://docs.spring.io/spring-ai/reference/api/chat/deepseek-chat.html) 和 [Structured Output](https://docs.spring.io/spring-ai/reference/api/structured-output/converters.html)。实现还核对了 Maven 中实际 2.0.2 sources，避免套用 1.x 的内部工具执行开关。
 
-## 本次文件清单
+## 集成实现文件
 
 | 范围 | 文件 |
 | --- | --- |
@@ -137,4 +141,4 @@ CI 使用 `spring.test.context.cache.maxSize=4` 限制测试上下文缓存。�
 | 原 SPI 的条件装配及共用外发策略 | `src/main/java/dev/supportflow/chat/infrastructure/deepseek/DeepSeekConfiguration.java`、`DeepSeekPublicKnowledgeSelector.java`，以及 `src/main/java/dev/supportflow/assistant/knowledge/RagConfiguration.java` |
 | 说明与审计 | `README.md`、`docs/project-overview.md`、`docs/interview-guide.md`、`docs/spring-ai-integration.md`、`docs/ai-job-gap-audit.md` |
 
-工作树中先前已有的前端、Redis 和会话修改不计入本次接入文件清单。
+此表定位框架适配文件，不是当前提交的变更清单。当前剩余 PARTIAL / NOT_IMPLEMENTED 项在能力审计中保留；冻结不要求新增 Reranker、LLM Query Rewrite、直接 token streaming 或另一套 Agent 运行时。

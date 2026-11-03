@@ -2,6 +2,8 @@
 
 SupportFlow 是一个 Java / Spring Boot + Vue 的店铺客服学习项目。买家查自己的订单、物流和售后进度；商家维护店铺知识、审核退款申请并接待人工咨询。模型参与问题理解和受限的只读决策，身份、权限、业务状态和资金边界由 Java 控制。
 
+当前进入 Feature Freeze 验收，业务闭环与 AI 主架构保持稳定，后续转向源码学习和面试表达。完成范围与最终 CI 证据见[能力审计](ai-job-gap-audit.md)；剩余 PARTIAL 项如实保留，不为增加技术名词继续扩架构。
+
 阅读顺序：[五分钟演示](demo-guide.md) → 本文的四条调用链 → [面试表达](interview-guide.md)。拿到交付包先读 [交付安装](delivery-install.md)；改源码沿用 [前端开发说明](../frontend/README.md) 和 [部署实验说明](../deploy/README.md)。
 
 ## 先认清系统里的人和数据
@@ -54,6 +56,8 @@ flowchart TD
 
 新任务使用 `AgentLoopExecutor`：规划下一步 → Java 校验 → 查本人订单或本地物流 → 保存观察结果和检查点 → 再决定下一步。输出是有业务数据依据的回答及可查询的运行状态。没有录入物流事件就回答暂无轨迹，不从“已发货”推断当前位置或到货时间。
 
+切换 Spring AI 后，模型链路为 `AgentLoopExecutor → SpringAiAgentDecisionPlanner → DeepSeekChatModel → DeepSeek API → validateDecision → 只读工具 → MySQL Checkpoint → 下一轮`。LLM 处理不确定的理解和规划；Java 控制授权、业务规则与真实执行。Observe / Decide / Validate / Execute / Checkpoint 的 State、Checkpoint 和 Budget 均保存在 MySQL。
+
 任务限制步数、原始截止时间、Token 和估算费用。检查点记录处理进度与预算；显式恢复不会重置预算。允许的暂时性只读失败可在持久化边界内有限重试，DeepSeek 入口还有熔断保护。退款审批和写入不进入这个自动重试循环。离线规则规划器运行相同循环，但不调用模型。
 
 代码：[会话入口](../src/main/java/dev/supportflow/chat/conversation/ConversationController.java)、[处理权与结果保存](../src/main/java/dev/supportflow/chat/conversation/ConversationService.java)、[路由编排](../src/main/java/dev/supportflow/assistant/orchestration/ConversationOrchestrator.java)、[运行时](../src/main/java/dev/supportflow/assistant/runtime/ReadOnlyAgentRuntime.java)、[循环执行](../src/main/java/dev/supportflow/assistant/runtime/AgentLoopExecutor.java)。
@@ -62,11 +66,13 @@ flowchart TD
 
 `ConversationOrchestrator` 把知识问题交给 `KnowledgeService`。它组合项目内置规则与当前店铺已发布资料，输出回答和带来源、版本、正文的证据；草稿不会直接进入买家检索。知识引用解释规则，具体订单状态仍要查业务服务。
 
-启用并准备本地模型后，`RagKnowledgeSearch` 使用 BGE 向量与关键词检索。向量可保存在 MySQL；缓存键包含店铺、来源、版本、内容哈希、模型指纹和分块号。缓存命中不能跳过“当前已发布资料”的可见性判断，旧向量不会使已下线资料继续可见。
+启用并准备本地模型后，`RagKnowledgeSearch` 使用关键词／词法与本地 BGE dense 混合检索，加权 RRF 类融合后结合相似度／margin 阈值和词法回退，返回 TopK 证据（当前最多 2 篇）。自有向量索引可保存在 MySQL；缓存按店铺、来源、版本、内容哈希和分块号隔离，持久索引另带模型指纹。缓存命中仍先复核当前店铺、发布、版本和可见性，旧向量不会使下线资料复活。当前没有 Spring AI VectorStore 或独立 Reranker。
 
 DeepSeek 的公开证据筛选是独立可选步骤。`DeepSeekPublicKnowledgeSelector` 只接受与受控公开目录精确匹配的候选；混入商家私有资料就整体拒绝外发。模型只返回候选来源 ID，Java 验证 ID 并保留完整来源条件。这个边界针对公开证据筛选，不能扩大成“所有模型请求都绝不涉及用户输入”的笼统承诺。
 
 商家上传 TXT/Markdown 后，`KnowledgeImportService.preview` 先解析预览；明确确认才保存草稿，再由 `KnowledgeManagementService` 发布并记录版本。当前没有 PDF/OCR 导入。
+
+售后说明可使用当前商家已发布知识解释流程和原因选项。实际订单资格、期限、金额、状态、审批和到账由 Java／数据库控制，文章不能覆盖业务规则。用户端只展示回答，完整来源、版本和快照继续保留用于审计。
 
 代码：[检索服务](../src/main/java/dev/supportflow/assistant/knowledge/KnowledgeService.java)、[向量检索](../src/main/java/dev/supportflow/assistant/knowledge/RagKnowledgeSearch.java)、[公开证据边界](../src/main/java/dev/supportflow/chat/infrastructure/deepseek/DeepSeekPublicKnowledgeSelector.java)、[导入服务](../src/main/java/dev/supportflow/merchant/knowledge/KnowledgeImportService.java)、[发布管理](../src/main/java/dev/supportflow/merchant/knowledge/KnowledgeManagementService.java)、[V21 向量结构](../src/main/resources/db/migration/V21__persistent_knowledge_vectors.sql)。
 
@@ -77,6 +83,8 @@ DeepSeek 的公开证据筛选是独立可选步骤。`DeepSeekPublicKnowledgeSe
 商家审核时再次验证店铺授权；申请人不能审核自己的申请。批准与执行任务入队在同一事务中完成。后台 worker 通过 `AfterSaleExecutionProcessor` 领取带租约的任务、复核审批与订单数据，再调用 `SimulatedRefundGateway`，保存 `SIM-` 回执与审计。这是数据库中的本地模拟流程，不能讲成接入支付渠道或真实到账。
 
 人工聊天走 `HumanSupportService`：`WAITING → ACTIVE → CLOSED`。`CHAT_SUPPORT` 独立于知识管理和售后审核权限，商家必须接待后才能读取自己负责的那次人工消息。等待队列不展示正文；商家接待页不开放买家的全部订单或智能历史。人工期间阻止同一买家、同一店铺的新智能回复；结束后保留历史并重置相关结构化主题。当前通过网页轮询收消息。
+
+“转人工”先产生 `HUMAN_SUPPORT` 提示和联系按钮，用户点击才进入上述流程。V23 增加双方最后一条成功人工消息后的 5 分钟空闲关闭（没有消息时从创建起算），页面读取、输入或重复发送旧请求不延长窗口。关闭后弹出 1–5 星及可选说明，只有本人能提交一次；相同评价重试幂等，消息历史保留。详见[人工服务说明](human-support.md)。
 
 代码：[售后提交与审批](../src/main/java/dev/supportflow/assistant/aftersale/AfterSaleService.java)、[期限规则](../src/main/java/dev/supportflow/assistant/aftersale/AfterSalePolicy.java)、[执行任务](../src/main/java/dev/supportflow/assistant/execution/AfterSaleExecutionProcessor.java)、[模拟回执](../src/main/java/dev/supportflow/assistant/execution/SimulatedRefundGateway.java)、[人工接待](../src/main/java/dev/supportflow/chat/support/HumanSupportService.java)、[V22 约束](../src/main/resources/db/migration/V22__human_support_handoff.sql)。
 
@@ -92,13 +100,21 @@ DeepSeek 的公开证据筛选是独立可选步骤。`DeepSeekPublicKnowledgeSe
 | 工程支撑 | 按认证身份限流、请求与阶段追踪、健康与指标 | 追踪结果和配额拒绝需要具体请求验证，不能凭配置宣称容量 |
 | 交付 | CI 工作流、可校验交付包、隔离部署入口 | 以对应 Actions run 和交付包验收结果为准；本地验证不等于云端 CI 通过 |
 
-登录会话支持可选 Redis 共享，当前全局限流和模型并发仍未迁移。没有实现的能力：MQ、微服务架构、WebSocket、PDF/OCR、真实物流公司接口、真实支付退款。固定订单读取和合成模型规划已有独立实验记录，不能换成生产容量、账单、在线用户量或业务收益；5000 笔 LAB 种子订单只是实验数据量。具体测量口径见[项目边界](project-boundaries.md)。
+登录会话支持可选 Redis 共享 HTTP Session；Redis 不保存 Agent State、Checkpoint、Budget、ChatMemory 或向量，当前全局限流和模型并发仍未迁移。SSE 在 Java 校验和持久化后分段输出最终回复，支持恢复；不是 provider token streaming 或首 token 直出。没有实现的能力：MQ、微服务架构、WebSocket、PDF/OCR、真实物流公司接口、真实支付退款。固定订单读取和合成模型规划已有独立实验记录，不能换成生产容量、账单、在线用户量或业务收益；5000 笔 LAB 种子订单只是实验数据量。具体测量口径见[项目边界](project-boundaries.md)。
+
+## 近期聊天修复如何串起来
+
+发货短追问“为什么还不发货”先使用明确选单或有效上下文，再复核认证买家、店铺和订单归属，读取最新业务状态；不会把“为什么还不”截成商品名，也不会自行编造延迟原因。上下文用于定位，不能代替当前权限和事实。
+
+“最近消费总金额”走 `SpendingQuestion → OrderQueryService.summarizeOwnedPaidOrdersLast30Days → JdbcSupportOrderRepository`，通过 SQL `COUNT/SUM` 汇总认证买家所有店铺、滚动近 30 天 `created_at` 窗口且当前处于 `PAID/SHIPPED/COMPLETED` 的 CNY 订单。隐藏订单仍计入，未扣退款；不是按支付时间的净消费账本，也不由模型心算金额。
 
 ## 用测试找证据
 
 Spring AI 2.0.2 模式通过同一个 `AgentDecisionPlanner` 接口进入上述调用链，默认仍为 `custom`。Spring AI 处理模型协议和结构化输出，原执行器继续负责工具调用与持久化约束。配置、边界及测试见 [Spring AI 集成](spring-ai-integration.md) 和 [能力审计](ai-job-gap-audit.md)。
 
-下面是可追问的测试入口，不是本次文档编辑重新运行测试的声明：
+真实 Spring AI 的独立报告为 6/6 合成任务、14 次模型调用、10081 token，工具选择、参数和任务成功三项比例为 1.0。这是小样本合成评测，不能代表生产准确率或生产延迟基线。Memory、Query Rewrite、VectorStore / Document、Streaming、Prompt Injection、Rate Limit、Evaluation、Observability 与成本预算仍有局限，详见能力审计。
+
+下面是可追问的测试入口；测试入口与本轮完整验收结果应分别核对：
 
 | 要证明的行为 | 先读哪份测试 |
 | --- | --- |

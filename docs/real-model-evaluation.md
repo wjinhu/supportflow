@@ -4,6 +4,8 @@
 
 默认不调用模型。普通 Maven 单元测试、集成测试、应用启动、部署和没有参数的本工具都不会触发付费评测。成绩只记录实际执行产生的报告，不预填“真实模型通过率”。
 
+2026-11-03 冻结核对已逐字段读取下面的归档 JSON：Spring AI 为 6/6 任务、14 次模型调用、10081 token，三项指标均为 1.0，失败和跳过均为 0。本轮只核验证据，没有重跑付费评测。所有比例仅适用于这个**小样本合成评测集，不代表生产准确率，也不构成生产延迟基线**，不能表述为“Agent 准确率 100%”。当前能力状态及最终 CI 证据见[能力审计](ai-job-gap-audit.md)。
+
 ## 2026-11-02 Spring AI durable Agent 实测
 
 `SpringAiLiveEvaluationTool` 本次 **ACTUALLY_RUN**：6 个合成任务全部通过，失败 0、跳过 0，共 14 次真实 DeepSeek 请求。模型为 `deepseek-flash`，数据集为 `spring-ai-durable-synthetic-v1`，SHA-256 为 `8c904e698c9008ac957187e48294551d847831bd64d9c08891147afb1dfb9340`。脱敏[原始 JSON 报告](evaluations/spring-ai-durable-2026-11-02.json)与代码一起归档，不改写为更大的样本成绩。
