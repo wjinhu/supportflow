@@ -9,11 +9,14 @@ import dev.supportflow.order.application.OrderQueryService;
 import dev.supportflow.order.application.model.OrderPage;
 import dev.supportflow.order.domain.OrderQueryLimits;
 import dev.supportflow.order.domain.model.SupportOrder;
+import dev.supportflow.assistant.planning.ExplicitOrderNumbers;
 import org.springframework.stereotype.Service;
 
 import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 
 /**
  * 店铺由HTTP路径提供，身份由认证提供；模型只识别订单号。
@@ -25,6 +28,9 @@ public class ChatService {
     private static final Pattern GREETING = Pattern.compile(
             "(?:你好|您好|嗨|哈喽|hello|hi|在吗|谢谢|多谢|再见)[！!？?。,.，\\s]*",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern ORDER_MENU = Pattern.compile("^(?:(?:请|麻烦)?帮我)?(?:查询|查看|看看|查一下|看下)(?:我的)?订单[？?！!。\\s]*$");
+    private static final DateTimeFormatter SUMMARY_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+            .withZone(ZoneId.of("Asia/Shanghai"));
 
     private final OrderQueryService orderQueryService;
     private final OrderIntentRecognizer orderIntentRecognizer;
@@ -43,11 +49,19 @@ public class ChatService {
         }
         validateSelectedOrderNo(selectedOrderNo);
         String normalized = message.strip();
+        if (SpendingQuestion.matches(normalized)) {
+            var clarification = SpendingQuestion.clarification(normalized);
+            if (clarification.isPresent()) return ChatReply.text(clarification.get());
+            var summary = orderQueryService.summarizeOwnedPaidOrdersLast30Days(identity);
+            return ChatReply.text("截至 " + SUMMARY_TIME.format(summary.until()) + "（北京时间），近30天下单的已付款订单，你在全部店铺共有 " + summary.orderCount()
+                    + " 笔，订单金额合计 ¥" + summary.totalAmount().toPlainString()
+                    + "。\n这是订单金额汇总，包含已隐藏订单，未扣除退款。");
+        }
         if (selectedOrderNo != null
                 && (normalized.equals("咨询此订单") || normalized.equals("查询此订单"))) {
             return replyWithOrder(identity, shopId, selectedOrderNo);
         }
-        if (normalized.equals("查订单")) {
+        if (normalized.equals("查订单") || normalized.equals("订单") || ORDER_MENU.matcher(normalized).matches()) {
             return replyWithOrderList(identity, shopId, 0L, true);
         }
         Optional<OrderListCommand> listCommand = OrderListCommand.parse(message);
@@ -66,13 +80,27 @@ public class ChatService {
 
     private ChatReply replyToNaturalLanguage(
             CustomerIdentity identity, long shopId, String message, String selectedOrderNo) {
+        var explicit = ExplicitOrderNumbers.extract(message);
+        if (OrderReadQuestion.asksShippingReason(message)) {
+            if (explicit.size() > 1) return ChatReply.text("你提到了多笔订单，请先选择要咨询的那一笔。");
+            String number = explicit.size() == 1 ? explicit.iterator().next() : selectedOrderNo;
+            if (number != null) return replyWithShippingStatus(identity, shopId, number);
+            if (OrderReadQuestion.isContextualRead(message)) return replyWithOrderList(identity, shopId, 0L, true);
+        }
+        if (selectedOrderNo != null && explicit.isEmpty() && OrderReadQuestion.isContextualRead(message)) {
+            return replyWithOrder(identity, shopId, selectedOrderNo);
+        }
         // 识别器只收到消息，不接收身份、权限或任何数据库中的订单详情。
         OrderIntent intent = orderIntentRecognizer.recognize(message);
         if (intent.type() == OrderIntentType.OTHER) {
             // OTHER is also returned when the optional recognizer is disabled; it is not proof of scope.
-            if (GREETING.matcher(message.strip()).matches() || CustomerQuestionScope.hasBusinessSubject(message)) {
-                return ChatReply.text("收到你的问题：" + message);
-            }
+            if (GREETING.matcher(message.strip()).matches()) return ChatReply.text(
+                    message.contains("谢") ? "不客气，有订单或商品方面的问题可以继续问我。"
+                            : message.contains("再见") ? "再见，需要帮助时随时来找我。"
+                            : "你好，我可以帮你查询订单、物流、售后，也可以解答商品使用问题。");
+            if (OrderReadQuestion.isContextualRead(message)) return replyWithOrderList(identity, shopId, 0L, true);
+            if (CustomerQuestionScope.hasBusinessSubject(message)) return ChatReply.text(
+                    "我暂时没有查到这项信息。你可以补充商品名称或选择要咨询的订单，也可以转人工客服进一步核实。");
             return ChatReply.outOfScope();
         }
         String orderNo = intent.orderNo() != null ? intent.orderNo() : selectedOrderNo;
@@ -85,6 +113,18 @@ public class ChatService {
     private ChatReply replyWithOrder(CustomerIdentity identity, long shopId, String orderNo) {
         SupportOrder order = orderQueryService.getOwnedOrder(identity, shopId, orderNo);
         return ChatReply.details(describeOrder(order), order);
+    }
+
+    private ChatReply replyWithShippingStatus(CustomerIdentity identity, long shopId, String orderNo) {
+        SupportOrder order = orderQueryService.getOwnedOrder(identity, shopId, orderNo);
+        String status = switch (order.status()) {
+            case PAID -> "这笔订单目前仍显示待发货。当前订单信息没有提供未发货的具体原因，可以转人工客服帮你核实发货进度。";
+            case CREATED -> "这笔订单目前待支付，尚未进入发货阶段。";
+            case CANCELLED -> "这笔订单已经取消，不会继续发货。";
+            case SHIPPED -> "这笔订单目前已经发货。你可以继续问我物流进度。";
+            case COMPLETED -> "这笔订单已经完成收货。若商品有问题，可以继续咨询售后。";
+        };
+        return ChatReply.details(status, order);
     }
 
     private ChatReply replyWithOrderList(CustomerIdentity identity, long shopId, long afterId, boolean prompt) {

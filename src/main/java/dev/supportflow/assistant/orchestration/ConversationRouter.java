@@ -1,6 +1,7 @@
 package dev.supportflow.assistant.orchestration;
 
 import org.springframework.stereotype.Component;
+import dev.supportflow.assistant.knowledge.AfterSaleKnowledgePolicy;
 
 import java.util.regex.Pattern;
 
@@ -16,6 +17,7 @@ public class ConversationRouter {
         String text = message.strip();
         // Explicit commands own their arguments: policy words inside a reason are not a knowledge query.
         if (text.startsWith("申请售后 ")) return AssistantRoute.AFTER_SALE;
+        if (AfterSaleKnowledgePolicy.isGuideQuestion(text)) return AssistantRoute.KNOWLEDGE;
         if (isPolicyQuestion(text)) return AssistantRoute.KNOWLEDGE;
         if (isHistoryQuestion(text)) return AssistantRoute.AFTER_SALE_HISTORY;
         if (isKnowledgeQuestion(text)) return AssistantRoute.KNOWLEDGE;

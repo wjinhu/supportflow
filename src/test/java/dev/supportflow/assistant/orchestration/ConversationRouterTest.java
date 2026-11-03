@@ -70,12 +70,20 @@ class ConversationRouterTest {
     @Test
     void shouldRouteAfterSaleProgressToOwnedHistoryInsteadOfLogistics() {
         for (String text : new String[]{"我的售后处理到哪了", "查看售后进度", "我的退款进度", "查询售后处理结果",
-                "退款是否到账", "如何查看我的退款进度", "SF10001申请退款了吗", "退款被拒绝了"}) {
+                "退款是否到账", "SF10001申请退款了吗", "退款被拒绝了"}) {
             assertThat(router.route(text)).as(text).isEqualTo(AssistantRoute.AFTER_SALE_HISTORY);
             assertThat(ConversationRouter.isRefundApplicationRequest(text)).as(text).isFalse();
         }
         assertThat(router.route("介绍售后处理规则")).isEqualTo(AssistantRoute.KNOWLEDGE);
         assertThat(router.route("申请售后 查询处理进度不准确")).isEqualTo(AssistantRoute.AFTER_SALE);
+    }
+
+    @Test
+    void progressLocationAndReasonSelectionExplainTheUiWithoutReadingOrWritingAnApplication() {
+        for (String text : new String[]{"如何查看我的退款进度", "售后进度在哪里看", "退款原因怎么选", "售后服务说明"}) {
+            assertThat(router.route(text)).as(text).isEqualTo(AssistantRoute.KNOWLEDGE);
+            assertThat(ConversationRouter.isRefundApplicationRequest(text)).as(text).isFalse();
+        }
     }
 
     @Test

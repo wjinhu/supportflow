@@ -13,6 +13,9 @@ import dev.supportflow.chat.application.model.ChatReply;
 import dev.supportflow.chat.application.model.ChatReplyType;
 import dev.supportflow.chat.application.model.KnowledgeStatus;
 import dev.supportflow.chat.application.ProductOrderQuestion;
+import dev.supportflow.chat.application.OrderReadQuestion;
+import dev.supportflow.chat.application.HumanSupportRequest;
+import dev.supportflow.chat.application.SpendingQuestion;
 import dev.supportflow.chat.application.CustomerQuestionScope;
 import dev.supportflow.chat.application.model.OrderSelectionIntent;
 import dev.supportflow.common.security.model.CustomerPrincipal;
@@ -86,8 +89,17 @@ public class ConversationContextEngine {
         var context = request.resetContext() || previous == null || !previous.activeAt(now)
                 ? ConversationContextRef.none() : previous;
         String message = request.message().strip();
+        if (HumanSupportRequest.matches(message)) {
+            // Offer the existing explicit handoff action; no model, order read or support write is needed.
+            return ChatResponse.from(ChatReply.humanSupport()).withContext(context);
+        }
         if (CustomerQuestionScope.isClearlyUnrelated(message)) {
             return ChatResponse.from(ChatReply.outOfScope()).withContext(ConversationContextRef.none());
+        }
+        if (SpendingQuestion.matches(message)) {
+            // Account totals are a new subject across shops, not the selected order's amount or an old FAQ.
+            return orchestrate(principal, shopId, message, null, runKey, request)
+                    .withContext(ConversationContextRef.none());
         }
         // Sensitive/write intent keeps the original explicit-input path. A remembered subject is never consent.
         if (NO_INHERITED_ARGUMENTS.matcher(message).find()) {
@@ -135,7 +147,7 @@ public class ConversationContextEngine {
                     : clarify("当前资料没有这项商品价格或公开费用的可靠说明，请明确商品或费用项目，或联系商铺客服核实。");
         }
         boolean boundedOrderRead = (reference && readSubject) || SHORT_ORDER_READ.matcher(message).matches()
-                || explicitOrder != null && readSubject;
+                || OrderReadQuestion.isContextualRead(message) || explicitOrder != null && readSubject;
         // The UI may still send yesterday's selected order with a newly named product FAQ.
         // A reliable current non-business subject may replace it; a bounded order read still wins.
         boolean lookedUpCurrentKnowledge = explicit.isEmpty() && !boundedOrderRead
@@ -151,7 +163,8 @@ public class ConversationContextEngine {
             if (number == null) return clarify("请先选择或明确一笔当前店铺的订单，我才能查询最新信息。");
             // The reference itself grants nothing. Recheck the current authenticated buyer and shop first.
             orders.getOwnedOrder(principal.getIdentity(), shopId, number);
-            String command = LOGISTICS_SUBJECT.matcher(message).find() ? "查物流" : "查询此订单";
+            String command = OrderReadQuestion.asksShippingReason(message) ? message
+                    : LOGISTICS_SUBJECT.matcher(message).find() ? "查物流" : "查询此订单";
             ChatResponse response = orchestrate(principal, shopId, command, number, runKey, request);
             return response.withContext(ConversationContextRef.order(number, expiry(now)));
         }
@@ -200,7 +213,8 @@ public class ConversationContextEngine {
                     .withContext(ConversationContextRef.none());
         }
         String number = matches.items().getFirst().orderNo();
-        String command = question.intent() == OrderSelectionIntent.LOGISTICS ? "查物流" : "查询此订单";
+        String command = OrderReadQuestion.asksShippingReason(request.message()) ? request.message()
+                : question.intent() == OrderSelectionIntent.LOGISTICS ? "查物流" : "查询此订单";
         ChatResponse result = orchestrate(principal, shopId, command, number, key, request);
         return new ChatResponse("以下是包含「" + question.keyword() + "」的订单信息（整单状态）：\n" + result.reply(),
                 result.type(), result.orders(), result.nextAfterId(), result.knowledge(),

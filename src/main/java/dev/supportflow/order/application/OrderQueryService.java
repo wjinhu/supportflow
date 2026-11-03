@@ -7,12 +7,17 @@ import dev.supportflow.order.application.model.OrderProductMatches;
 import dev.supportflow.order.domain.OrderQueryLimits;
 import dev.supportflow.order.domain.model.SupportOrder;
 import dev.supportflow.order.domain.model.ProductOrderKeyword;
+import dev.supportflow.order.domain.model.OrderSpendingSummary;
 import dev.supportflow.order.domain.repository.SupportOrderRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.List;
 import java.util.Objects;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 
 /**
  * 当前平台买家的跨商铺订单查询用例。
@@ -22,10 +27,23 @@ import java.util.Objects;
 public class OrderQueryService {
 
     private final SupportOrderRepository supportOrderRepository;
+    private final Clock clock;
 
+    @Autowired
     public OrderQueryService(SupportOrderRepository supportOrderRepository) {
+        this(supportOrderRepository, Clock.systemUTC());
+    }
+
+    OrderQueryService(SupportOrderRepository supportOrderRepository, Clock clock) {
         this.supportOrderRepository = Objects.requireNonNull(
                 supportOrderRepository, "supportOrderRepository must not be null");
+        this.clock = Objects.requireNonNull(clock);
+    }
+
+    public OrderSpendingSummary summarizeOwnedPaidOrdersLast30Days(CustomerIdentity identity) {
+        Objects.requireNonNull(identity, "identity must not be null");
+        var until = clock.instant().truncatedTo(ChronoUnit.MILLIS);
+        return supportOrderRepository.summarizePaidByBuyerId(identity.buyerId(), until.minus(Duration.ofDays(30)), until);
     }
 
     /**

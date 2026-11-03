@@ -4,6 +4,9 @@ import dev.supportflow.assistant.knowledge.KnowledgeService;
 import dev.supportflow.assistant.runtime.store.AgentRunInput;
 import dev.supportflow.chat.application.model.ChatReply;
 import dev.supportflow.chat.application.CustomerQuestionScope;
+import dev.supportflow.chat.application.SpendingQuestion;
+import dev.supportflow.chat.application.OrderReadQuestion;
+import dev.supportflow.chat.application.HumanSupportRequest;
 import dev.supportflow.common.security.model.CustomerPrincipal;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +28,7 @@ public class ConversationOrchestrator {
     }
 
     public ChatReply reply(CustomerPrincipal principal, long shopId, String message, String orderNo) {
+        if (HumanSupportRequest.matches(message)) return ChatReply.humanSupport();
         if (CustomerQuestionScope.isClearlyUnrelated(message)) return ChatReply.outOfScope();
         AssistantRoute route = router.route(message);
         if (route == AssistantRoute.KNOWLEDGE) {
@@ -39,6 +43,7 @@ public class ConversationOrchestrator {
     }
 
     public ChatReply reply(CustomerPrincipal principal, long shopId, String message, String orderNo, AgentRunInput input) {
+        if (HumanSupportRequest.matches(message)) return ChatReply.humanSupport();
         if (CustomerQuestionScope.isClearlyUnrelated(message)) return ChatReply.outOfScope();
         AssistantRoute route = router.route(message);
         if (route != AssistantRoute.LOGISTICS) return reply(principal, shopId, message, orderNo);
@@ -49,6 +54,7 @@ public class ConversationOrchestrator {
         // Only the non-business subset of ORDER's existing fallback may consult shop FAQs.
         // Selected-order context keeps the existing business path authoritative, even for short follow-ups.
         return (orderNo == null || orderNo.isBlank())
+                && !SpendingQuestion.matches(message) && !OrderReadQuestion.isContextualRead(message)
                 && !KnowledgeService.isOrderFactQuestion(message)
                 && dev.supportflow.assistant.planning.ExplicitOrderNumbers.extract(message).isEmpty()
                 && !BUSINESS_QUERY.matcher(message).find();

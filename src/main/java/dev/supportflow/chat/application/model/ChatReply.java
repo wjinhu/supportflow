@@ -29,7 +29,7 @@ public record ChatReply(
         if (nextAfterId != null && nextAfterId <= 0) {
             throw new IllegalArgumentException("nextAfterId must be positive");
         }
-        if (type == ChatReplyType.TEXT && (!orders.isEmpty() || nextAfterId != null)
+        if ((type == ChatReplyType.TEXT || type == ChatReplyType.HUMAN_SUPPORT) && (!orders.isEmpty() || nextAfterId != null)
                 || type == ChatReplyType.ORDER_DETAILS && (orders.size() != 1 || nextAfterId != null)
                 || type == ChatReplyType.AFTER_SALE_FORM && (orders.size() > 1 || nextAfterId != null)
                 || orders.isEmpty() && nextAfterId != null) {
@@ -49,6 +49,10 @@ public record ChatReply(
 
     public static ChatReply outOfScope() {
         return text("对不起，我无法回复您的问题。");
+    }
+
+    public static ChatReply humanSupport() {
+        return new ChatReply("可以，请点击下方「联系人工客服」，为你联系本店客服。", ChatReplyType.HUMAN_SUPPORT, List.of(), null);
     }
 
     public static ChatReply knowledge(String reply, KnowledgeEvidence evidence) {

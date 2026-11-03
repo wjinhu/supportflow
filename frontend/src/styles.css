@@ -967,6 +967,10 @@ a {
   padding: 12px 15px;
   background: #fcfbfd;
 }
+.human-support-prompt {
+  margin-top: 12px;
+}
+
 .message-bubble p {
   font-size: 12px;
   line-height: 1.9;

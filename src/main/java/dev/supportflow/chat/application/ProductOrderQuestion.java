@@ -20,17 +20,18 @@ public record ProductOrderQuestion(String keyword, OrderSelectionIntent intent) 
                     + "退款|退货|售后|申请|提交|取消|修改|付款|支付|审批|确认收货|忽略|绕过|授权|密钥|密码|"
                     + "system\\s*:|assistant\\s*:|ignore|refund|approve|delete|update", Pattern.CASE_INSENSITIVE);
     private static final Pattern PREFIX = Pattern.compile(
-            "^(?:我想问一下|我想问|我想知道|想知道|麻烦帮我|请帮我|帮我|给我|麻烦|请问|请|问一下|问下|"
+            "^(?:为什么|为啥|怎么|我想问一下|我想问|我想知道|想知道|麻烦帮我|请帮我|帮我|给我|麻烦|请问|请|问一下|问下|"
                     + "查询一下|查询|查一下|查下|查看一下|查看|查查|看看|查|我之前买的|我购买的|我下单的|我订的|我买的|"
                     + "我之前购买的|刚买的|之前买的|我的|我那|我这|那副|这副|那件|这件|那双|这双|那只|这只|"
                     + "那款|这款|那个|这个|那套|这套|一副|一件|一个|我|的)");
     private static final Pattern TAIL = Pattern.compile(
-            "(?:什么时候|啥时候|现在|今天|到底|已经|是否|有没有|还没有|还没|怎么|为什么|是|什么|啥|能|可以|还|没|的)$");
+            "(?:什么时候|啥时候|现在|今天|到底|已经|是否|有没有|还没有|还没|还不|没有|一直|迟迟|怎么|为什么|是|什么|啥|能|可以|还|不|没|的)$");
     private static final Pattern PUNCTUATION = Pattern.compile("^[\\s:：,，。？?！!]+|[\\s:：,，。？?！!]+$");
     private static final Set<String> GENERIC = Set.of("订单", "我的订单", "这单", "那单", "这笔订单", "那笔订单", "商品", "东西", "包裹", "快递", "它", "那", "这");
 
     public static Optional<ProductOrderQuestion> parse(String input) {
         String message = Normalizer.normalize(input.strip(), Normalizer.Form.NFKC);
+        if (OrderReadQuestion.isContextualRead(message)) return Optional.empty();
         if (PUBLIC_OR_WRITE.matcher(message).find()) return Optional.empty();
         var read = READ_SUBJECT.matcher(message);
         if (!read.find()) return Optional.empty();

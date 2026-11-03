@@ -1,14 +1,17 @@
 package dev.supportflow.order.domain.repository;
 
 import dev.supportflow.order.domain.model.SupportOrder;
+import dev.supportflow.order.domain.model.OrderSpendingSummary;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.Instant;
 
 /**
  * 客服订单读取能力。
  *
- * <p>每次查询必须限定认证结果中的平台买家ID，并排除买家已删除的订单。
+ * <p>每次查询必须限定认证结果中的平台买家ID。详情与列表排除买家已删除的订单；
+ * 账户金额汇总不因隐藏订单而减少，退款另行处理。
  * 原订单与商家售后、审计记录由各自仓储保留。</p>
  */
 public interface SupportOrderRepository {
@@ -51,4 +54,7 @@ public interface SupportOrderRepository {
 
     /** Literal product-name/specification matching within the authenticated buyer and current shop. */
     List<SupportOrder> findByProductName(long shopId, long buyerId, String keyword, int limit);
+
+    /** All-shop gross totals for currently paid orders created in [from, until), including buyer-hidden rows. */
+    OrderSpendingSummary summarizePaidByBuyerId(long buyerId, Instant from, Instant until);
 }

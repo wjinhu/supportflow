@@ -19,7 +19,7 @@ import type {
   ReceiptConfirmation,
 } from '../src/types'
 
-const password = 'Frontend-Test-Only!'
+const password = '123456'
 const reviewPath = '/api/v1/merchant/shops/100/after-sales'
 const buyerHeaders = {
   'X-Session-Account': 'frontend-buyer',
@@ -434,7 +434,7 @@ test('real history uses bounded pages for both conversations and older messages'
 })
 
 test('real Spring Security CSRF and real MySQL owned-order selection', async ({ page }) => {
-  await connect(page, 'frontend-buyer', 'Frontend-Test-Only!')
+  await connect(page, 'frontend-buyer', '123456')
   await showOrders(page)
   const panel = page.getByTestId('orders-panel')
   await expect(panel.getByTestId('order-card')).toHaveCount(20)
@@ -662,7 +662,7 @@ test('receipt confirmation needs explicit consent and persists the server receip
 test('real account orders retain both shops and consulting a same-number order enters its own shop', async ({
   page,
 }) => {
-  await connect(page, 'frontend-buyer', 'Frontend-Test-Only!')
+  await connect(page, 'frontend-buyer', '123456')
   await showOrders(page)
   const panel = page.getByTestId('orders-panel')
   await page.getByTestId('load-more-orders').click()
@@ -680,7 +680,7 @@ test('real account orders retain both shops and consulting a same-number order e
 })
 
 test('real API does not reveal another buyer owned-order details', async ({ page }) => {
-  await connect(page, 'frontend-other', 'Frontend-Test-Only!')
+  await connect(page, 'frontend-other', '123456')
   await showOrders(page)
   const cards = page.getByTestId('orders-panel').getByTestId('order-card')
   await expect(cards).toHaveCount(1)

@@ -1,12 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { connect, send, showChat, showOrders, switchShop } from './helpers'
+import { connect, send, showChat, showOrders, switchShop, readConversationTurn } from './helpers'
 
-const password = 'Frontend-Test-Only!'
+const password = '123456'
 
-test('live buyer handoff, chat-only staff claim/reply, close and AI restoration', async ({
+test('live typed handoff prompt, chat-only staff claim/reply, close and AI restoration', async ({
   page,
   browser,
-}) => {
+}, testInfo) => {
   let aiPosts = 0
   page.on('request', (request) => {
     if (
@@ -22,7 +22,43 @@ test('live buyer handoff, chat-only staff claim/reply, close and AI restoration'
     await activeClose.click()
     await expect(page.getByTestId('request-human-support')).toBeVisible()
   }
-  await page.getByTestId('request-human-support').click()
+  let supportRequests = 0
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      /\/conversations\/[^/]+\/support$/.test(new URL(request.url()).pathname)
+    )
+      supportRequests++
+  })
+  const handoffResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      /\/conversations\/[^/]+\/messages$/.test(new URL(response.url()).pathname),
+  )
+  await send(page, '转人工')
+  const turn = await readConversationTurn(await handoffResponse)
+  expect(turn.messages.find((message) => message.role === 'ASSISTANT')?.response?.type).toBe(
+    'HUMAN_SUPPORT',
+  )
+  const prompt = page.getByTestId('chat-message').last()
+  await expect(prompt.getByTestId('contact-human-support')).toBeVisible()
+  await expect(prompt).not.toContainText('无法回复')
+  expect(supportRequests).toBe(0)
+  await page.screenshot({
+    path: testInfo.outputPath('typed-human-support-prompt.png'),
+    fullPage: true,
+  })
+  await page.reload()
+  await connect(page, 'frontend-buyer', password)
+  const restoredPrompt = page
+    .getByTestId('chat-message')
+    .filter({ has: page.getByTestId('contact-human-support') })
+    .last()
+  await expect(
+    restoredPrompt.getByRole('button', { name: '联系人工客服', exact: true }),
+  ).toBeVisible()
+  await restoredPrompt.getByTestId('contact-human-support').click()
+  await expect(page.getByTestId('contact-human-support')).toHaveCount(0)
   await expect(page.getByTestId('buyer-support-status')).toContainText('正在等待店铺客服接待')
   const text = `人工核实 ${Date.now()}`
   await send(page, text)
@@ -48,7 +84,8 @@ test('live buyer handoff, chat-only staff claim/reply, close and AI restoration'
   await expect(refund).toBeVisible()
   await expect(refund.locator('#refund-order option')).toHaveCount(21)
   await refund.getByRole('button', { name: '关闭', exact: true }).click()
-  expect(aiPosts).toBe(0)
+  expect(aiPosts).toBe(1)
+  expect(supportRequests).toBe(1)
   const context = await browser.newContext()
   const staff = await context.newPage()
   await staff.goto('/merchant')
@@ -72,7 +109,7 @@ test('live buyer handoff, chat-only staff claim/reply, close and AI restoration'
   await expect(page.getByTestId('chat-message').last()).toContainText('店铺智能客服')
   await expect(page.getByTestId('chat-message').filter({ hasText: text })).toHaveCount(1)
   await expect(page.getByTestId('chat-message').filter({ hasText: reply })).toHaveCount(1)
-  expect(aiPosts).toBe(1)
+  expect(aiPosts).toBe(2)
   await page.reload()
   await connect(page, 'frontend-buyer', password)
   await expect(page.getByTestId('chat-message').filter({ hasText: text })).toHaveCount(1)

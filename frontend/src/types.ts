@@ -32,7 +32,8 @@ export interface ReceiptConfirmation {
   eligibility: AfterSaleEligibility
 }
 
-export type ChatReplyType = 'TEXT' | 'ORDER_DETAILS' | 'ORDER_SELECTION' | 'AFTER_SALE_FORM'
+export type ChatReplyType =
+  'TEXT' | 'ORDER_DETAILS' | 'ORDER_SELECTION' | 'AFTER_SALE_FORM' | 'HUMAN_SUPPORT'
 export type OrderSelectionIntent = 'ORDER_STATUS' | 'LOGISTICS'
 
 /** Immutable evidence carried with this reply, never a URL to fetch current article content. */

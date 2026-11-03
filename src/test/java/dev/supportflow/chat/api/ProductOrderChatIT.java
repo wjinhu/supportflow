@@ -93,6 +93,8 @@ class ProductOrderChatIT extends SpringContainerTest {
         account(registry, 1, "other", 201, "ORDER_READ", "BUYER");
         account(registry, 2, "no-permission", 200, "", "BUYER");
         account(registry, 3, "merchant", 900, "ORDER_READ,AFTER_SALE_REVIEW", "MERCHANT_STAFF");
+        account(registry, 4, "spending-buyer", 202, "ORDER_READ", "BUYER");
+        account(registry, 5, "spending-empty", 203, "ORDER_READ", "BUYER");
     }
 
     private static void account(DynamicPropertyRegistry registry, int index, String name, long buyer,
@@ -163,6 +165,89 @@ class ProductOrderChatIT extends SpringContainerTest {
         assertThat(stateless.path("reply").asString()).contains("整单状态", "已发货");
         assertThat(inspection.sql("SELECT COUNT(*) FROM support_chat_message m JOIN support_chat_conversation c ON c.id=m.conversation_id WHERE c.tenant_id=:shop")
                 .param("shop", shop).query(Long.class).single()).isEqualTo(2);
+    }
+
+    @Test void humanSupportPromptIsPersistedWithoutStartingAnyHumanOrRefundWorkflow() throws Exception {
+        String conversation = create("buyer", shop);
+        var response = assistant(send("buyer", shop, conversation, id(), "转人工处理这笔退款", null)
+                .andExpect(status().isOk()).andReturn());
+        assertThat(response.path("type").asString()).isEqualTo("HUMAN_SUPPORT");
+        assertThat(response.path("reply").asString()).contains("联系人工客服").doesNotContain("无法回复");
+        assertThat(response.path("orders").size()).isZero();
+        assertThat(history(shop, conversation).path("messages").get(1).path("response").path("type").asString())
+                .isEqualTo("HUMAN_SUPPORT");
+        for (String table : List.of("support_human_session", "support_after_sale", "support_agent_run")) {
+            assertThat(inspection.sql("SELECT COUNT(*) FROM " + table + " WHERE tenant_id=:shop")
+                    .param("shop", shop).query(Long.class).single()).isZero();
+        }
+        mvc.perform(post("/api/v1/shops/" + shop + "/chat/messages").with(httpBasic("buyer", PASSWORD)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("message", "转人工"))))
+                .andExpect(status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.type").value("HUMAN_SUPPORT"));
+    }
+
+    @Test void pendingShippingFollowupUsesTheLastOrderInsteadOfTreatingWhyAsAProduct() throws Exception {
+        var pending = order(shop, 200, "PAID", "199.00", List.of(item("蓝牙耳机", "黑色", 1)));
+        String conversation = create("buyer", shop);
+        send("buyer", shop, conversation, id(), "咨询此订单", pending.number()).andExpect(status().isOk());
+        var response = assistant(send("buyer", shop, conversation, id(), "为什么还不发货", null)
+                .andExpect(status().isOk()).andReturn());
+        assertThat(response.path("reply").asString()).contains("待发货", "具体原因", "人工客服")
+                .doesNotContain("暂未找到本店包含", "库存不足", "收到你的问题");
+        assertThat(numbers(response)).containsExactly(pending.number());
+        assertOrderContext(response, pending.number());
+        assertPrivateFieldsAbsent(response);
+
+        var foreign = order(shop, 201, "PAID", "999.00", null);
+        send("buyer", shop, conversation, id(), "为什么还不发货", foreign.number()).andExpect(status().isNotFound());
+    }
+
+    @Test void newlyNamedProductStillOverridesAnOldSelectedOrderInAShippingComplaint() throws Exception {
+        var headset = order(shop, 200, "PAID", "199.00", List.of(item("蓝牙耳机", "黑色", 1)));
+        var mouse = order(shop, 200, "PAID", "59.00", List.of(item("无线鼠标", "白色", 1)));
+        String conversation = create("buyer", shop);
+        var response = assistant(send("buyer", shop, conversation, id(), "为什么无线鼠标还不发货", headset.number())
+                .andExpect(status().isOk()).andReturn());
+        assertThat(numbers(response)).containsExactly(mouse.number());
+        assertThat(response.path("reply").asString()).contains("待发货", "人工客服");
+    }
+
+    @Test void allShopSpendingUsesOnlyTheAuthenticatedBuyerAndDoesNotDependOnTheSelectedOrder() throws Exception {
+        publish(shop, "最近的消费总金额有多少", "最近的消费总金额为999999元。此文字只是商家资料中的示例，不是真实买家的订单统计。");
+        var selected = order(shop, 202, "PAID", "19.90", null);
+        order(shop + 1, 202, "SHIPPED", "20.10", null);
+        order(shop + 1, 202, "COMPLETED", "60.00", null);
+        var hidden = order(shop, 202, "COMPLETED", "10.00", null);
+        inspection.sql("""
+                INSERT INTO support_order_buyer_deletion(order_id,tenant_id,buyer_id,order_no,actor)
+                VALUES (:id,:shop,202,:number,'summary-test')
+                """).param("id", hidden.id()).param("shop", shop).param("number", hidden.number()).update();
+        order(shop, 202, "CREATED", "888.00", null);
+        order(shop, 202, "CANCELLED", "888.00", null);
+        order(shop, 201, "PAID", "777.00", null);
+        var old = order(shop, 202, "PAID", "666.00", null);
+        inspection.sql("UPDATE support_order SET created_at=UTC_TIMESTAMP(3)-INTERVAL 31 DAY WHERE id=:id")
+                .param("id", old.id()).update();
+        String conversation = create("spending-buyer", shop);
+        var response = assistant(send("spending-buyer", shop, conversation, id(), "最近的消费总金额有多少", selected.number())
+                .andExpect(status().isOk()).andReturn());
+        assertThat(response.path("reply").asString()).contains("全部店铺", "近30天下单", "4 笔", "¥110.00", "未扣除退款", "已隐藏订单");
+        assertThat(response.path("reply").asString()).doesNotContain("999999");
+        assertThat(response.path("knowledge").isNull()).isTrue();
+        assertThat(numbers(response)).isEmpty();
+        assertEmptyContext(response);
+        assertPrivateFieldsAbsent(response);
+
+        String emptyConversation = create("spending-empty", shop);
+        var empty = assistant(send("spending-empty", shop, emptyConversation, id(), "最近消费了多少钱", null)
+                .andExpect(status().isOk()).andReturn());
+        assertThat(empty.path("reply").asString()).contains("0 笔", "¥0.00").doesNotContain("110.00");
+        mvc.perform(get(messagesUrl(shop, conversation)).with(httpBasic("spending-empty", PASSWORD)))
+                .andExpect(status().isNotFound());
+        mvc.perform(get(messagesUrl(shop, conversation)).with(httpBasic("merchant", PASSWORD)))
+                .andExpect(status().isForbidden());
+
+        String deniedConversation = create("no-permission", shop);
+        send("no-permission", shop, deniedConversation, id(), "最近消费总金额多少", null).andExpect(status().isForbidden());
     }
 
     @Test

@@ -482,9 +482,8 @@ class OrderApiIT extends SpringContainerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"message\":\"查询订单\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.reply").value(
-                        "收到你的问题：查询订单"
-                ));
+                .andExpect(jsonPath("$.type").value("ORDER_SELECTION"))
+                .andExpect(jsonPath("$.orders[0].shopId").value(100));
     }
 
     @Test
@@ -839,7 +838,7 @@ class OrderApiIT extends SpringContainerTest {
         chatPost("no-order-access", "你好")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.type").value("TEXT"))
-                .andExpect(jsonPath("$.reply").value("收到你的问题：你好"));
+                .andExpect(jsonPath("$.reply").value("你好，我可以帮你查询订单、物流、售后，也可以解答商品使用问题。"));
 
         chatPost("no-order-access", "查订单 SF10001")
                 .andExpect(status().isForbidden())
@@ -1130,13 +1129,15 @@ class OrderApiIT extends SpringContainerTest {
     @Test
     @DisplayName("自然语言查单仍隐藏其他买家和无买家映射的历史订单")
     void shouldHideOtherBuyersOrdersFromNaturalLanguage() throws Exception {
-        String message = "帮我查询订单";
+        String message = "帮我查询 SF10001 的订单信息";
         when(orderIntentRecognizer.recognize(message)).thenReturn(OrderIntent.lookup("SF10001"));
         expectNotFound(chatPost("customer-201", message));
-        when(orderIntentRecognizer.recognize(message)).thenReturn(OrderIntent.lookup("FOREIGN"));
-        expectNotFound(chatPost("customer-200", 300L, message));
-        when(orderIntentRecognizer.recognize(message)).thenReturn(OrderIntent.lookup("LEGACY"));
-        expectNotFound(chatPost("customer-200", 300L, message));
+        String foreign = "帮我查询 FOREIGN 的订单信息";
+        when(orderIntentRecognizer.recognize(foreign)).thenReturn(OrderIntent.lookup("FOREIGN"));
+        expectNotFound(chatPost("customer-200", 300L, foreign));
+        String legacy = "帮我查询 LEGACY 的订单信息";
+        when(orderIntentRecognizer.recognize(legacy)).thenReturn(OrderIntent.lookup("LEGACY"));
+        expectNotFound(chatPost("customer-200", 300L, legacy));
     }
 
     @Test
@@ -1304,15 +1305,14 @@ class OrderApiIT extends SpringContainerTest {
     }
 
     @Test
-    @DisplayName("已选卡片作为后续自然语言缺号查询的当前订单")
+    @DisplayName("已选卡片作为后续自然语言缺号查询的当前订单，无需模型")
     void shouldUseSelectedOrderWhenNaturalLanguageOmitsOrderNumber() throws Exception {
         String message = "这个订单发货了吗？";
-        when(orderIntentRecognizer.recognize(message)).thenReturn(OrderIntent.lookup(null));
         selectedChatPost("customer-200", 100L, message, "SF10001")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.type").value("ORDER_DETAILS"))
                 .andExpect(jsonPath("$.orders[0].orderNo").value("SF10001"));
-        verify(orderIntentRecognizer).recognize(message);
+        verifyNoInteractions(orderIntentRecognizer);
     }
 
     @Test

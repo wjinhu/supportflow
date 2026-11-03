@@ -24,6 +24,8 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -212,6 +214,40 @@ class JdbcSupportOrderRepositoryIT {
             assertThat(order.updatedAt())
                     .isEqualTo(Instant.parse("2026-10-02T05:06:07.456Z"));
         });
+    }
+
+    @Test void paidSummaryAggregatesBeyondPageLimitsAcrossShopsWithExactTimeAndBuyerScope() throws Exception {
+        long buyer = 987650L;
+        Instant from = Instant.parse("2026-10-01T00:00:00Z"), until = Instant.parse("2026-10-31T00:00:00Z");
+        try (Connection connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+             PreparedStatement insert = connection.prepareStatement("""
+                     INSERT INTO support_order(tenant_id,customer_id,buyer_id,order_no,status,total_amount,currency,created_at)
+                     VALUES (?,777,?,?,?,?,'CNY',?)
+                     """)) {
+            String[] statuses = {"PAID", "SHIPPED", "COMPLETED"};
+            for (int index = 0; index < 120; index++) {
+                spendingRow(insert, 100 + index % 2, buyer, statuses[index % 3], "0.10", from.plusSeconds(1));
+            }
+            spendingRow(insert, 101, buyer, "PAID", "0.20", from); // inclusive lower boundary
+            spendingRow(insert, 100, buyer, "PAID", "999.00", from.minusMillis(1));
+            spendingRow(insert, 100, buyer, "PAID", "999.00", until); // exclusive upper boundary
+            spendingRow(insert, 100, buyer, "CREATED", "999.00", from.plusSeconds(1));
+            spendingRow(insert, 100, buyer, "CANCELLED", "999.00", from.plusSeconds(1));
+            spendingRow(insert, 100, buyer + 1, "PAID", "999.00", from.plusSeconds(1));
+        }
+        var summary = repository.summarizePaidByBuyerId(buyer, from, until);
+        assertThat(summary.orderCount()).isEqualTo(121);
+        assertThat(summary.totalAmount()).isEqualByComparingTo("12.20");
+        assertThat(summary.from()).isEqualTo(from);
+        assertThat(summary.until()).isEqualTo(until);
+        assertThat(repository.summarizePaidByBuyerId(buyer + 2, from, until).totalAmount()).isEqualByComparingTo("0.00");
+    }
+
+    private static void spendingRow(PreparedStatement insert, long shop, long buyer, String status, String amount, Instant created) throws SQLException {
+        insert.setLong(1, shop); insert.setLong(2, buyer); insert.setString(3, "SUM-" + UUID.randomUUID());
+        insert.setString(4, status); insert.setBigDecimal(5, new BigDecimal(amount));
+        insert.setObject(6, LocalDateTime.ofInstant(created, ZoneOffset.UTC));
+        insert.executeUpdate();
     }
 
     @Test

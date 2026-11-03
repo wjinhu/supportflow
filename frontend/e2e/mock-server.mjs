@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 
 // Public, fake browser-test credentials. This server never reads local application secrets.
 export const MOCK_USERNAME = 'buyer-demo'
-export const MOCK_PASSWORD = 'browser-test-only'
+export const MOCK_PASSWORD = '123456'
 const expectedAuthorization = `Basic ${Buffer.from(`${MOCK_USERNAME}:${MOCK_PASSWORD}`).toString('base64')}`
 const slowAuthorization = `Basic ${Buffer.from(`slow-buyer:${MOCK_PASSWORD}`).toString('base64')}`
 const sessions = new Map()

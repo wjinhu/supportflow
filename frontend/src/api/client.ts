@@ -196,7 +196,9 @@ function parseChat(value: unknown, shopId: string): ChatResponse {
     !isRecord(value) ||
     typeof value.reply !== 'string' ||
     typeof value.type !== 'string' ||
-    !['TEXT', 'ORDER_DETAILS', 'ORDER_SELECTION', 'AFTER_SALE_FORM'].includes(String(value.type)) ||
+    !['TEXT', 'ORDER_DETAILS', 'ORDER_SELECTION', 'AFTER_SALE_FORM', 'HUMAN_SUPPORT'].includes(
+      String(value.type),
+    ) ||
     !Array.isArray(value.orders) ||
     !value.orders.every(validOrder) ||
     value.orders.some((order) => order.shopId !== Number(shopId)) ||
@@ -212,6 +214,7 @@ function parseChat(value: unknown, shopId: string): ChatResponse {
     (value.knowledge != null &&
       (value.type !== 'TEXT' || value.orders.length !== 0 || value.nextAfterId !== null)) ||
     (value.type === 'AFTER_SALE_FORM' && (value.orders.length > 1 || value.nextAfterId !== null)) ||
+    (value.type === 'HUMAN_SUPPORT' && (value.orders.length !== 0 || value.nextAfterId !== null)) ||
     !(
       value.nextAfterId === null ||
       (value.nextAfterId === undefined &&

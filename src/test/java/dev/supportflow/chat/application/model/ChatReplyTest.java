@@ -17,6 +17,18 @@ class ChatReplyTest {
             new BigDecimal("100.00"), "CNY", Instant.EPOCH, Instant.EPOCH);
 
     @Test
+    void humanSupportPromptCarriesOnlyTheExplicitActionAndNoBusinessData() {
+        ChatReply prompt = ChatReply.humanSupport();
+        assertThat(prompt.type()).isEqualTo(ChatReplyType.HUMAN_SUPPORT);
+        assertThat(prompt.orders()).isEmpty();
+        assertThat(prompt.knowledge()).isNull();
+        assertThatThrownBy(() -> new ChatReply("contact", ChatReplyType.HUMAN_SUPPORT, List.of(order), null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ChatReply("contact", ChatReplyType.HUMAN_SUPPORT, List.of(), 1L))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void shouldRepresentAnUnselectedOrSingleOrderRefundForm() {
         assertThat(ChatReply.refundForm("选择订单", null).orders()).isEmpty();
         ChatReply selected = ChatReply.refundForm("填写退款原因", order);

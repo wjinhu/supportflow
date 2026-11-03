@@ -29,6 +29,17 @@ class ConversationOrchestratorTest {
     private final ConversationOrchestrator orchestrator = new ConversationOrchestrator(new ConversationRouter(), knowledge, agent);
 
     @ParameterizedTest
+    @ValueSource(strings = {"转人工", "找人工客服", "转人工查物流", "请找人工帮我申请退款"})
+    void explicitHandoffSkipsFaqModelAndBusinessExecution(String message) {
+        for (String selected : new String[] {null, "SF10001"}) {
+            var response = orchestrator.reply(principal, 100, message, selected);
+            assertThat(response).isEqualTo(ChatReply.humanSupport());
+            assertThat(orchestrator.reply(principal, 100, message, selected, null)).isEqualTo(response);
+        }
+        verifyNoInteractions(knowledge, agent);
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {
             "这个是通过查数据库回答的吗", "刚刚回答的问题", "明天天气怎么样", "帮我写一段Java代码",
             "帮我写查询订单的SQL", "请写一个退款接口的Java代码"
@@ -92,6 +103,15 @@ class ConversationOrchestratorTest {
         when(agent.execute(AssistantRoute.ORDER, principal, 100, "金额是多少", "SF10001")).thenReturn(expected);
         assertThat(orchestrator.reply(principal, 100, "金额是多少", "SF10001")).isSameAs(expected);
         verify(agent).execute(AssistantRoute.ORDER, principal, 100, "金额是多少", "SF10001");
+        verifyNoInteractions(knowledge);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"最近的消费总金额有多少", "为什么还不发货"})
+    void accountTotalsAndContextualOrderReadsCannotBeAnsweredByShopFaq(String message) {
+        ChatReply expected = ChatReply.text("真实业务查询或订单选择");
+        when(agent.execute(AssistantRoute.ORDER, principal, 100, message, null)).thenReturn(expected);
+        assertThat(orchestrator.reply(principal, 100, message, null)).isSameAs(expected);
         verifyNoInteractions(knowledge);
     }
 

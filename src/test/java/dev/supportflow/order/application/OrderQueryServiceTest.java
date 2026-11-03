@@ -6,6 +6,7 @@ import dev.supportflow.order.application.model.OrderPage;
 import dev.supportflow.order.domain.OrderQueryLimits;
 import dev.supportflow.order.domain.model.OrderStatus;
 import dev.supportflow.order.domain.model.SupportOrder;
+import dev.supportflow.order.domain.model.OrderSpendingSummary;
 import dev.supportflow.order.domain.repository.SupportOrderRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -13,6 +14,9 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.Clock;
+import java.time.ZoneOffset;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.LongStream;
@@ -76,6 +80,17 @@ class OrderQueryServiceTest {
                 200L,
                 "SF10001"
         );
+    }
+
+    @Test void summaryUsesAuthenticatedBuyerAndAnExactRollingWindow() {
+        var now = Instant.parse("2026-11-03T02:00:00.123Z");
+        var from = now.minus(Duration.ofDays(30));
+        var expected = new OrderSpendingSummary(3, new BigDecimal("12.34"), from, now);
+        when(supportOrderRepository.summarizePaidByBuyerId(200, from, now)).thenReturn(expected);
+        var service = new OrderQueryService(supportOrderRepository, Clock.fixed(now, ZoneOffset.UTC));
+        assertThat(service.summarizeOwnedPaidOrdersLast30Days(CUSTOMER_IDENTITY)).isEqualTo(expected);
+        verify(supportOrderRepository).summarizePaidByBuyerId(200, from, now);
+        verifyNoMoreInteractions(supportOrderRepository);
     }
 
     @Test

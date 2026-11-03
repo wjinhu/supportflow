@@ -25,7 +25,7 @@ test('buyer explicitly requests support, staff claims and replies, close restore
   const staff = await context.newPage()
   await staff.goto('/merchant')
   await staff.getByTestId('merchant-username').fill('chat-staff')
-  await staff.getByTestId('merchant-password').fill('browser-test-only')
+  await staff.getByTestId('merchant-password').fill('123456')
   await staff.getByTestId('merchant-connect').click()
   await expect(staff.getByTestId('human-support-panel')).toBeVisible()
   await expect(staff.getByTestId('merchant-tab-after-sales')).toHaveCount(0)

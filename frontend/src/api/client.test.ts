@@ -937,6 +937,28 @@ describe('ApiClient', () => {
     },
   )
 
+  it('accepts an explicit human-support prompt without order data', async () => {
+    const response = { ...reply, type: 'HUMAN_SUPPORT', reply: '请点击联系人工客服', orders: [] }
+    const request = fetchMock()
+      .mockResolvedValueOnce(json(csrf))
+      .mockResolvedValueOnce(json(response))
+    await expect(new ApiClient('buyer', 'test', request).chat('100', '转人工')).resolves.toEqual(
+      response,
+    )
+  })
+
+  it.each([{ orders: [order] }, { nextAfterId: 1 }, { selectionIntent: 'LOGISTICS' }])(
+    'rejects business data attached to a human-support prompt: %j',
+    async (invalid) => {
+      const request = fetchMock()
+        .mockResolvedValueOnce(json(csrf))
+        .mockResolvedValueOnce(json({ ...reply, type: 'HUMAN_SUPPORT', orders: [], ...invalid }))
+      await expect(
+        new ApiClient('buyer', 'test', request).chat('100', '转人工'),
+      ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+    },
+  )
+
   it('rejects an ambiguous multi-order refund form', async () => {
     const request = fetchMock()
       .mockResolvedValueOnce(json(csrf))

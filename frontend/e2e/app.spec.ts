@@ -70,6 +70,34 @@ async function streamStatus(request: APIRequestContext, message: string) {
   }>
 }
 
+test('human contact action waits for a validated final reply and opens the existing support flow', async ({
+  page,
+  request,
+}) => {
+  const message = '转人工'
+  await prepareStream(request, message, ['请点击下方联系人工客服。'], { type: 'HUMAN_SUPPORT' })
+  await connect(page)
+  await send(page, message)
+  await expect(page.getByTestId('streaming-reply')).toBeVisible()
+  await expect(page.getByTestId('contact-human-support')).toHaveCount(0)
+  await releaseStream(request, message, 'complete')
+  const button = page.getByTestId('chat-message').last().getByTestId('contact-human-support')
+  await expect(button).toBeVisible()
+  expect(
+    (await recorded(request)).filter(
+      (entry) => entry.method === 'POST' && /\/support$/.test(entry.path),
+    ),
+  ).toHaveLength(0)
+  await button.click()
+  await expect(page.getByTestId('buyer-support-status')).toContainText('正在等待店铺客服接待')
+  await expect(page.getByTestId('contact-human-support')).toHaveCount(0)
+  expect(
+    (await recorded(request)).filter(
+      (entry) => entry.method === 'POST' && /\/support$/.test(entry.path),
+    ),
+  ).toHaveLength(1)
+})
+
 test('streamed text is visible before completion while order actions wait for the canonical turn', async ({
   page,
   request,
@@ -617,7 +645,9 @@ test('switching workspaces preserves the draft and conversation without submitti
   // The optimistic USER bubble already contains SF10001. Capture only a committed pair,
   // after SSE completion and display draining have replaced the temporary assistant.
   await expect(page.getByTestId('stop-reply')).not.toBeVisible()
-  await expect(page.getByTestId('chat-message').filter({ has: page.locator('.message-order-list') })).toHaveCount(1)
+  await expect(
+    page.getByTestId('chat-message').filter({ has: page.locator('.message-order-list') }),
+  ).toHaveCount(1)
   await expect(page.getByTestId('chat-message').last()).toContainText('SF10001')
   const messageOrder = await page.getByTestId('chat-message').allTextContents()
   const messageCount = await page.getByTestId('chat-message').count()
@@ -757,9 +787,9 @@ test('credentials and CSRF token are not persisted in browser storage', async ({
   const storage = await page.evaluate(() =>
     JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }),
   )
-  expect(storage).not.toContain('browser-test-only')
+  expect(storage).not.toContain('123456')
   expect(storage).not.toContain('buyer-demo')
-  expect(storage).not.toContain(btoa('buyer-demo:browser-test-only'))
+  expect(storage).not.toContain(btoa('buyer-demo:123456'))
   await page.reload()
   await expect(page.getByTestId('disconnect-button')).toHaveCount(0)
   await expect(page.getByTestId('send-button')).toBeDisabled()
@@ -961,7 +991,7 @@ test('401 expires the account and prevents further sends', async ({ page }) => {
 test('canceling pending login does not connect later or retain the password', async ({ page }) => {
   await page.getByRole('button', { name: '连接账号', exact: true }).first().click()
   await page.getByTestId('username-input').fill('slow-buyer')
-  await page.getByTestId('password-input').fill('browser-test-only')
+  await page.getByTestId('password-input').fill('123456')
   await page.getByTestId('connect-button').click()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: '连接你的客服账号' })).not.toBeVisible()

@@ -6,6 +6,7 @@ import dev.supportflow.chat.application.model.KnowledgeStatus;
 import dev.supportflow.merchant.knowledge.KnowledgeDraft;
 import dev.supportflow.merchant.knowledge.KnowledgeLimits;
 import dev.supportflow.merchant.knowledge.KnowledgeRepository;
+import dev.supportflow.assistant.aftersale.AfterSalePolicyProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
@@ -27,6 +28,7 @@ public class KnowledgeService {
     private final KnowledgeRepository managed;
     private final RagKnowledgeSearch rag;
     private final PublicKnowledgeSelector publicSelector;
+    private int afterSaleWindowDays = 15;
     private final PublicReferenceCatalog publicReferences = new PublicReferenceCatalog();
     private static final String UNAVAILABLE = "当前服务暂时不可用，请稍后重试或联系店铺客服。";
     private static final Pattern PROTECTED = Pattern.compile(
@@ -67,6 +69,11 @@ public class KnowledgeService {
     @Autowired
     public KnowledgeService(KnowledgeRepository managed, RagKnowledgeSearch rag, ObjectProvider<PublicKnowledgeSelector> selectors) {
         this(managed, rag, selectors.getIfAvailable());
+    }
+
+    @Autowired
+    void configureAfterSalePolicy(AfterSalePolicyProperties properties) {
+        afterSaleWindowDays = properties.windowDays();
     }
 
     KnowledgeService(KnowledgeRepository managed, RagKnowledgeSearch rag, PublicKnowledgeSelector publicSelector) {
@@ -206,8 +213,13 @@ public class KnowledgeService {
     }
 
     private List<KnowledgeMatch> search(long shopId, List<KnowledgeDocument> documents, String message) {
-        return rag == null ? new KnowledgeRetriever(documents).retrieve(retrievalQuery(message))
+        var matches = rag == null ? new KnowledgeRetriever(documents).retrieve(retrievalQuery(message))
                 : rag.search(shopId, documents, retrievalQuery(message));
+        if (AfterSaleKnowledgePolicy.isGuideQuestion(message)) {
+            var guides = matches.stream().filter(match -> match.sourceId().startsWith("kb-")).toList();
+            if (!guides.isEmpty()) return guides;
+        }
+        return matches;
     }
 
     /** Management counts/builds exactly the same current publication set used by scoped retrieval. */
@@ -233,7 +245,15 @@ public class KnowledgeService {
                 // The original scoped evidence remains usable; never expose remote failures or rerun business work.
             }
         }
-        return renderDetailed(matches);
+        var answer = renderDetailed(matches);
+        if (AfterSaleKnowledgePolicy.isGuideQuestion(message) && !matches.isEmpty()) {
+            String text = String.join("\n\n", matches.stream().map(match -> match.sourceId().startsWith("kb-")
+                    ? AfterSaleKnowledgePolicy.explanatoryText(message, match.content()) : answerContent(match)).toList()).strip();
+            if (!text.isBlank() && text.length() <= KnowledgeAnswer.MAX_REPLY_LENGTH) {
+                return new KnowledgeAnswer(text, answer.evidence());
+            }
+        }
+        return answer;
     }
 
     private KnowledgeAnswer renderDetailed(List<KnowledgeMatch> matches) {
@@ -263,7 +283,7 @@ public class KnowledgeService {
             throw new IllegalStateException("Published corpus exceeds the enforced shop bound");
         }
         var documents = new ArrayList<>(snapshots.stream()
-                .filter(source -> !isProtected(source.title() + " " + String.join(" ", source.keywords())
+                .filter(source -> allowsSource(source.title() + " " + String.join(" ", source.keywords())
                         + " " + source.content()))
                 .map(source -> {
                     var checked = new KnowledgeDraft(source.title(), source.keywords(), source.content());
@@ -280,8 +300,13 @@ public class KnowledgeService {
     }
 
     private static boolean isProtected(String message) {
-        return message != null && (PROTECTED.matcher(message).find() || INSTRUCTION.matcher(message).find()
-                || isOrderFactQuestion(message));
+        return message != null && (INSTRUCTION.matcher(message).find() || isOrderFactQuestion(message)
+                || PROTECTED.matcher(message).find() && !AfterSaleKnowledgePolicy.isGuideQuestion(message));
+    }
+
+    private boolean allowsSource(String text) {
+        if (INSTRUCTION.matcher(text).find() || isOrderFactQuestion(text)) return false;
+        return !PROTECTED.matcher(text).find() || AfterSaleKnowledgePolicy.allowsSource(text, afterSaleWindowDays);
     }
 
     /** Actual order amounts and ownership are database facts, not merchant-authored FAQ evidence. */

@@ -44,6 +44,17 @@ class ConversationContextEngineTest {
     private final ConversationContextEngine engine = new ConversationContextEngine(orchestrator, knowledge, orders,
             new ConversationRouter(), Clock.fixed(NOW, ZoneOffset.UTC));
 
+    @Test
+    void handoffPromptCannotBeInterceptedByAnOldOrderOrKnowledgeSubject() {
+        for (var previous : List.of(ConversationContextRef.none(), orderContext(), knowledgeContext())) {
+            var response = reply("转人工处理这个订单退款", "SF10001", previous);
+            assertThat(response.type()).isEqualTo(dev.supportflow.chat.application.model.ChatReplyType.HUMAN_SUPPORT);
+            assertThat(response.orders()).isEmpty();
+            assertThat(response.context()).isEqualTo(previous);
+        }
+        verifyNoInteractions(orders, knowledge, orchestrator);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             "这个是通过查数据库回答的吗", "刚刚回答的问题", "明天天气怎么样", "帮我写一段Java代码",
@@ -91,6 +102,27 @@ class ConversationContextEngineTest {
         ChatResponse response = reply("查订单 SF10001", null, ConversationContextRef.none());
         assertThat(response.context()).isEqualTo(ConversationContextRef.order("SF10001", expiry()));
         assertThat(response.context().sourceIds()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"为什么还不发货", "怎么还没发货", "为啥一直没有发货"})
+    void shippingDelayContinuesTheOwnedOrderWithoutSearchingQuestionWordsAsProductNames(String message) {
+        when(orchestrator.reply(principal, 100, message, "SF10001"))
+                .thenReturn(ChatReply.details("仍待发货，原因需人工核实", order("SF10001")));
+        var response = reply(message, null, orderContext());
+        assertThat(response.reply()).contains("待发货");
+        assertThat(response.context().orderNo()).isEqualTo("SF10001");
+        verify(orders).getOwnedOrder(principal.getIdentity(), 100, "SF10001");
+        verifyNoInteractions(knowledge);
+    }
+
+    @Test void accountTotalsAreNotTheLastSelectedOrdersAmountOrAnOldKnowledgeAnswer() {
+        String message = "最近的消费总金额有多少";
+        when(orchestrator.reply(principal, 100, message, null)).thenReturn(ChatReply.text("全部店铺合计¥110.00"));
+        var response = reply(message, "SF10001", orderContext());
+        assertThat(response.reply()).contains("110.00");
+        assertThat(response.context().kind()).isEqualTo(ConversationContextKind.NONE);
+        verifyNoInteractions(orders, knowledge);
     }
 
     @Test

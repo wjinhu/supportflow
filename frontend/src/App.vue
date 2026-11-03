@@ -185,6 +185,19 @@ const canSend = computed(
 const orderCountLabel = computed(
   () => `${accountOrders.value.length}${accountNextAfterId.value !== null ? '+' : ''}`,
 )
+const canRequestHumanSupport = computed(
+  () =>
+    connected.value &&
+    !humanActive.value &&
+    !busy.value &&
+    !humanRequesting.value &&
+    !humanSubmitting.value &&
+    !historyLoading.value &&
+    !conversationsLoading.value &&
+    !refundSubmitting.value &&
+    !receiptSubmitting.value &&
+    !deletingConversation.value,
+)
 
 function openLogin() {
   loginUsername.value = username.value
@@ -872,17 +885,7 @@ watch(
               <button
                 type="button"
                 data-testid="request-human-support"
-                :disabled="
-                  !connected ||
-                  busy ||
-                  humanRequesting ||
-                  humanSubmitting ||
-                  historyLoading ||
-                  conversationsLoading ||
-                  refundSubmitting ||
-                  receiptSubmitting ||
-                  deletingConversation
-                "
+                :disabled="!canRequestHumanSupport"
                 @click="requestHumanSupport"
               >
                 {{ humanRequesting ? '正在联系…' : '联系人工客服' }}
@@ -1064,6 +1067,22 @@ watch(
                     :data-testid="message.streaming ? 'streaming-reply' : undefined"
                   >
                     <p>{{ message.text }}</p>
+                    <button
+                      v-if="
+                        message.role === 'assistant' &&
+                        message.type === 'HUMAN_SUPPORT' &&
+                        !message.streaming &&
+                        !message.pending &&
+                        !humanActive
+                      "
+                      type="button"
+                      class="button button-secondary human-support-prompt"
+                      data-testid="contact-human-support"
+                      :disabled="!canRequestHumanSupport"
+                      @click="requestHumanSupport"
+                    >
+                      {{ humanRequesting ? '正在联系…' : '联系人工客服' }}
+                    </button>
                   </div>
                   <div
                     v-if="message.orders?.length"

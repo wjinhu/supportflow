@@ -112,7 +112,7 @@ export async function readConversationTurn(
   return turn
 }
 
-export async function connect(page: Page, username = 'buyer-demo', password = 'browser-test-only') {
+export async function connect(page: Page, username = 'buyer-demo', password = '123456') {
   await installConversationCapture(page)
   await page.getByRole('button', { name: '连接账号', exact: true }).first().click()
   await page.getByTestId('username-input').fill(username)

@@ -3,7 +3,7 @@ import type { ChatResponse, KnowledgeArticle } from '../src/types'
 import { connect, send, switchShop, clearShopConversation, readConversationTurn } from './helpers'
 import { sessionAccount } from './session'
 
-const password = 'Frontend-Test-Only!'
+const password = '123456'
 const knowledgeBase = '/api/v1/merchant/shops/100/knowledge'
 
 async function editor(): Promise<APIRequestContext> {
@@ -49,6 +49,39 @@ async function ask(page: Page, text: string) {
     requestBody: response.request().postDataJSON() as { orderNo?: string; resetContext?: boolean },
   }
 }
+
+test('shipping complaints continue the current order and spending asks for real all-shop totals', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(75_000)
+  await page.goto('/?shopId=101')
+  await connect(page, 'frontend-buyer', password)
+  await clearShopConversation(page)
+  const selected = await ask(page, '查订单 SF10001')
+  expect(selected.answer.orders[0]?.status).toBe('PAID')
+
+  await page.reload()
+  await connect(page, 'frontend-buyer', password)
+  const followup = await ask(page, '为什么还不发货')
+  expect(followup.requestBody.orderNo == null).toBe(true)
+  expect(followup.answer.orders[0]?.orderNo).toBe('SF10001')
+  expect(followup.answer.reply).toContain('待发货')
+  expect(followup.answer.reply).toContain('人工客服')
+  expect(followup.answer.reply).not.toContain('暂未找到本店包含')
+
+  const spending = await ask(page, '最近的消费总金额有多少')
+  expect(spending.answer.type).toBe('TEXT')
+  expect(spending.answer.orders).toEqual([])
+  expect(spending.answer.context?.kind).toBe('NONE')
+  expect(spending.answer.reply).toContain('全部店铺')
+  expect(spending.answer.reply).toContain('近30天下单')
+  expect(spending.answer.reply).toMatch(/金额合计 ¥\d+\.\d{2}/)
+  expect(spending.answer.reply).not.toContain('收到你的问题')
+  await page.screenshot({
+    path: testInfo.outputPath('shipping-followup-and-spending.png'),
+    fullPage: true,
+  })
+})
 
 test('restored order context supports a fresh read and cancelling the current selection resets it', async ({
   page,

@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class FrontendTestServer {
 
-    private static final String PUBLIC_TEST_PASSWORD = "Frontend-Test-Only!";
+    private static final String PUBLIC_TEST_PASSWORD = "123456";
     private static final String DATABASE_NAME = "supportflow_frontend_test";
 
     private FrontendTestServer() {

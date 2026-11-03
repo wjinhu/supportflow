@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
 import type {
   ChatResponse,
   KnowledgeArticle,
@@ -9,7 +10,7 @@ import { connect, send, readConversationTurn } from './helpers'
 import { sessionAccount } from './session'
 
 // Public isolated-launcher identities, never daily business credentials.
-const password = 'Frontend-Test-Only!'
+const password = '123456'
 const base = '/api/v1/merchant/shops/100/knowledge'
 
 async function account(username: string): Promise<APIRequestContext> {
@@ -81,6 +82,81 @@ async function act(page: Page, id: string, action: 'publish' | 'offline') {
   expect(response.status()).toBe(200)
   return (await response.json()) as KnowledgeArticle
 }
+
+test('published after-sale guide answers explanation questions while actual policy and refund actions stay separate', async ({
+  page,
+  browser,
+}, testInfo) => {
+  test.setTimeout(90_000)
+  const editor = await account('frontend-editor')
+  const buyerContext = await browser.newContext()
+  const buyer = await buyerContext.newPage()
+  let published: KnowledgeArticle | null = null
+  try {
+    const content = (
+      await readFile(new URL('../../docs/knowledge/售后服务说明.md', import.meta.url), 'utf8')
+    ).trim()
+    await login(page)
+    const article = await newDraft(
+      page,
+      `售后服务说明-${Date.now()}`,
+      '售后说明,退款原因,申请退款',
+      content,
+    )
+    published = await act(page, article.id, 'publish')
+    await buyer.goto('/?shopId=100')
+    await connect(buyer, 'frontend-buyer', password)
+    const responseFor = async (message: string) => {
+      const responded = buyer.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          /\/conversations\/[^/]+\/messages$/.test(new URL(response.url()).pathname) &&
+          response.request().postDataJSON()?.message === message,
+      )
+      await send(buyer, message)
+      const turn = await readConversationTurn(await responded)
+      const answer = turn.messages.find((item) => item.role === 'ASSISTANT')!.response!
+      await expect(buyer.getByTestId('chat-message').last()).toContainText(answer.reply)
+      return answer
+    }
+    const guidance = await responseFor('退款原因怎么选')
+    expect(guidance.type).toBe('TEXT')
+    expect(guidance.knowledge?.sources.map((source) => source.sourceId)).toContain(
+      `kb-${article.id}`,
+    )
+    expect(guidance.reply).toContain('个人原因')
+    expect(guidance.reply).toContain('商铺原因')
+    expect(guidance.reply).not.toContain('##')
+    expect(guidance.reply).not.toContain('十五天')
+    await expect(buyer.getByRole('dialog', { name: '申请退款', exact: true })).not.toBeVisible()
+    await buyer.screenshot({
+      path: testInfo.outputPath('after-sale-guide-answer.png'),
+      fullPage: true,
+    })
+    const policy = await responseFor('售后期限是多少天')
+    expect(policy.reply).toContain('15天')
+    expect(policy.knowledge?.sources.map((source) => source.sourceId)).not.toContain(
+      `kb-${article.id}`,
+    )
+    await call(editor, 'POST', `${base}/${article.id}/offline`, {
+      expectedVersion: published.version,
+    })
+    published = null
+    const offline = await responseFor('售后说明')
+    expect(offline.knowledge?.sources.map((source) => source.sourceId) ?? []).not.toContain(
+      `kb-${article.id}`,
+    )
+    const application = await responseFor('申请退款')
+    expect(application.type).toBe('AFTER_SALE_FORM')
+  } finally {
+    if (published)
+      await call(editor, 'POST', `${base}/${published.id}/offline`, {
+        expectedVersion: published.version,
+      })
+    await buyerContext.close()
+    await editor.dispose()
+  }
+})
 
 test('merchant file import previews without writes then saves a draft, reuses it and respects publication', async ({
   page,

@@ -36,6 +36,9 @@ public record ChatResponse(
 
     public ChatResponse {
         orders = List.copyOf(orders);
+        if (type == ChatReplyType.HUMAN_SUPPORT && (!orders.isEmpty() || nextAfterId != null)) {
+            throw new IllegalArgumentException("Human support prompt cannot carry order actions");
+        }
         if (knowledge != null && (type != ChatReplyType.TEXT || !orders.isEmpty() || nextAfterId != null)) {
             throw new IllegalArgumentException("Knowledge evidence cannot replace business results");
         }

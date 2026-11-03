@@ -11,6 +11,7 @@ import dev.supportflow.order.application.model.OrderPage;
 import dev.supportflow.order.domain.OrderQueryLimits;
 import dev.supportflow.order.domain.model.OrderStatus;
 import dev.supportflow.order.domain.model.SupportOrder;
+import dev.supportflow.order.domain.model.OrderSpendingSummary;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,10 +49,10 @@ class ChatServiceTest {
     }
 
     @Test
-    @DisplayName("普通消息保留原文，返回纯文字结果且不读取订单")
-    void shouldEchoWithoutReadingOrders() {
+    @DisplayName("问候返回可理解的帮助，不复述原文或读取订单")
+    void shouldGreetWithoutEchoingOrReadingOrders() {
         ChatReply result = reply("  你好  ");
-        assertThat(result.reply()).isEqualTo("收到你的问题：  你好  ");
+        assertThat(result.reply()).isEqualTo("你好，我可以帮你查询订单、物流、售后，也可以解答商品使用问题。");
         assertThat(result.type()).isEqualTo(ChatReplyType.TEXT);
         assertThat(result.orders()).isEmpty();
         assertThat(result.nextAfterId()).isNull();
@@ -70,9 +71,10 @@ class ChatServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"查询订单", "商品材质怎么保养", "耳机的包装是什么"})
+    @ValueSource(strings = {"商品材质怎么保养", "耳机的包装是什么"})
     void shouldNotTreatAnUnrecognizedBusinessQuestionAsUnrelated(String message) {
         assertThat(reply(message).reply()).isNotEqualTo("对不起，我无法回复您的问题。");
+        assertThat(reply(message).reply()).doesNotContain("收到你的问题");
         verifyNoInteractions(orderQueryService);
     }
 
@@ -296,6 +298,47 @@ class ChatServiceTest {
 
     private ChatReply reply(String message) {
         return service.reply(IDENTITY, 100L, message, null);
+    }
+
+    @Test void accountSummaryUsesTrustedIdentityAndIgnoresSelectedOrderWithoutCallingModel() {
+        var now = Instant.parse("2026-11-03T00:00:00Z");
+        when(orderQueryService.summarizeOwnedPaidOrdersLast30Days(IDENTITY))
+                .thenReturn(new OrderSpendingSummary(4, new BigDecimal("110.00"), now.minusSeconds(30L * 86400), now));
+        var result = service.reply(IDENTITY, 100, "最近的消费总金额有多少", "SF10001");
+        assertThat(result.reply()).contains("近30天下单", "全部店铺", "4 笔", "¥110.00", "未扣除退款", "已隐藏订单").doesNotContain("收到你的问题");
+        assertThat(result.orders()).isEmpty();
+        verify(orderQueryService).summarizeOwnedPaidOrdersLast30Days(IDENTITY);
+        verifyNoInteractions(recognizer);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"最近7天消费多少", "最近两个月消费多少", "本店消费多少", "其他用户消费总额"})
+    void unsupportedAccountSummaryNeverQueriesOrCallsModel(String input) {
+        assertThat(reply(input).reply()).doesNotContain("收到你的问题");
+        verifyNoInteractions(orderQueryService, recognizer);
+    }
+
+    @Test void pendingShippingReasonDoesNotInventWarehouseFacts() {
+        var order = new SupportOrder(1001, 100, 777, 200, "SF10001", OrderStatus.PAID,
+                new BigDecimal("199.90"), "CNY", Instant.EPOCH, Instant.EPOCH);
+        when(orderQueryService.getOwnedOrder(IDENTITY, 100, "SF10001")).thenReturn(order);
+        var result = service.reply(IDENTITY, 100, "为什么还不发货", "SF10001");
+        assertThat(result.reply()).contains("待发货", "具体原因", "人工客服").doesNotContain("库存不足", "仓库拥堵", "一定", "收到你的问题");
+        assertThat(result.orders()).containsExactly(order);
+        verifyNoInteractions(recognizer);
+    }
+
+    @Test void naturalOrderMenuWorksWithoutModel() {
+        page(0, List.of(shippedOrder(100, "SF10001")), null);
+        assertThat(reply("查询订单").orders()).hasSize(1);
+        verifyNoInteractions(recognizer);
+    }
+
+    @Test void aFailedSpendingQueryCannotBecomeAFabricatedZero() {
+        when(orderQueryService.summarizeOwnedPaidOrdersLast30Days(IDENTITY))
+                .thenThrow(new DataAccessResourceFailureException("unavailable"));
+        assertThatThrownBy(() -> reply("最近消费总金额多少")).isInstanceOf(DataAccessResourceFailureException.class);
+        verifyNoInteractions(recognizer);
     }
 
     private void page(long afterId, List<SupportOrder> orders, Long nextAfterId) {

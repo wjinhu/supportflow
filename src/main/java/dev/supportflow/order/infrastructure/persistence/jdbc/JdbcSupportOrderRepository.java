@@ -4,6 +4,7 @@ import dev.supportflow.order.domain.OrderQueryLimits;
 import dev.supportflow.order.domain.model.OrderStatus;
 import dev.supportflow.order.domain.model.ProductOrderKeyword;
 import dev.supportflow.order.domain.model.SupportOrder;
+import dev.supportflow.order.domain.model.OrderSpendingSummary;
 import dev.supportflow.order.domain.repository.SupportOrderRepository;
 import org.springframework.dao.DataRetrievalFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -14,6 +15,7 @@ import java.sql.SQLException;
 import java.sql.Types;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -103,8 +105,29 @@ public class JdbcSupportOrderRepository implements SupportOrderRepository {
 
     private final JdbcClient jdbcClient;
 
+    // Currency is constrained to CNY by V1. A hidden order remains part of gross account totals.
+    private static final String SUM_PAID_BY_BUYER_SQL = """
+            SELECT COUNT(*) AS order_count, COALESCE(SUM(total_amount), 0.00) AS total_amount
+            FROM support_order
+            WHERE buyer_id = :buyerId
+              AND status IN ('PAID', 'SHIPPED', 'COMPLETED')
+              AND created_at >= :fromTime AND created_at < :untilTime
+            """;
+
     public JdbcSupportOrderRepository(JdbcClient jdbcClient) {
         this.jdbcClient = Objects.requireNonNull(jdbcClient, "jdbcClient must not be null");
+    }
+
+    @Override
+    public OrderSpendingSummary summarizePaidByBuyerId(long buyerId, Instant from, Instant until) {
+        if (buyerId <= 0 || from == null || until == null || !from.isBefore(until))
+            throw new IllegalArgumentException("Invalid spending range or owner");
+        return jdbcClient.sql(SUM_PAID_BY_BUYER_SQL)
+                .param("buyerId", buyerId)
+                .param("fromTime", LocalDateTime.ofInstant(from, ZoneOffset.UTC))
+                .param("untilTime", LocalDateTime.ofInstant(until, ZoneOffset.UTC))
+                .query((row, index) -> new OrderSpendingSummary(row.getLong("order_count"),
+                        row.getBigDecimal("total_amount"), from, until)).single();
     }
 
     @Override

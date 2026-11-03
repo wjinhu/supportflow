@@ -194,6 +194,30 @@ class KnowledgeManagementIT extends SpringContainerTest {
     }
 
     @Test
+    void afterSaleGuideUsesOnlyCurrentPublicationWithoutCreatingBusinessWrites() throws Exception {
+        long shop = isolatedShop();
+        String content = java.nio.file.Files.readString(java.nio.file.Path.of("docs/knowledge/售后服务说明.md")).strip();
+        JsonNode draft = body(createRequest("editor", shop, Map.of("title", "售后服务说明",
+                "keywords", List.of("售后服务", "售后说明", "退款原因", "申请退款"), "content", content), true)
+                .andExpect(status().isOk()).andReturn());
+        String id = draft.path("id").asString();
+        long cases = count("support_after_sale"), sessions = count("support_human_session");
+        assertThat(chatResponse(shop, "售后服务说明").path("knowledge").path("sources").toString()).doesNotContain(id);
+        JsonNode published = mutate("editor", shop, draft, "publish");
+        JsonNode explained = chatResponse(shop, "退款原因怎么选");
+        assertThat(explained.path("type").asString()).isEqualTo("TEXT");
+        assertThat(explained.path("reply").asString()).contains("个人原因", "商铺原因");
+        assertThat(explained.path("knowledge").path("sources").toString()).contains("kb-" + id);
+        assertThat(chatResponse(200, "售后服务说明").path("knowledge").path("sources").toString()).doesNotContain(id);
+        assertThat(chatResponse(shop, "售后期限是多少天").path("knowledge").path("sources").toString()).doesNotContain(id);
+        assertThat(chatResponse(shop, "申请退款").path("type").asString()).isEqualTo("AFTER_SALE_FORM");
+        assertThat(count("support_after_sale")).isEqualTo(cases);
+        assertThat(count("support_human_session")).isEqualTo(sessions);
+        mutate("editor", shop, published, "offline");
+        assertThat(chatResponse(shop, "售后服务说明").path("knowledge").path("sources").toString()).doesNotContain(id);
+    }
+
+    @Test
     void shouldKeepDraftInvisibleAndPublishAnImmutableSnapshotWithCitation() throws Exception {
         String keyword = unique();
         String content = "Published coffee guide " + keyword + ": KEEP-ORIGINAL-FLAVOUR";
